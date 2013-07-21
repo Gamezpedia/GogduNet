@@ -1162,8 +1162,8 @@ package gogduNet.connection
 			
 			if(bool == false)
 			{
-				_record.addRecord("Sensed unpermitted connection(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(address:" + socket.remoteAddress + 
-					", port:" + socket.remotePort + ")", true);
+				_record.addRecord(true, "Sensed unpermitted connection(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(address:" + socket.remoteAddress + 
+					", port:" + socket.remotePort + ")");
 				dispatchEvent( new GogduNetEvent(GogduNetEvent.UNPERMITTED_CONNECTION, false, false, {address:socket.remoteAddress, port:socket.remotePort}) );
 				socket.close();
 				return;

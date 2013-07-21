@@ -569,12 +569,12 @@ package gogduNet.connection
 				{
 					if(jsonObj.t == DataType.DEFINITION)
 					{
-						/*_record.addRecord("Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")", true);*/
+						/*_record.addRecord(true, "Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")");*/
 						dispatchEvent(new DataEvent(DataEvent.RECEIVE_DATA, false, false, null, jsonObj.t, jsonObj.df, null));
 					}
 					else
 					{
-						/*_record.addRecord("Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")", true);*/
+						/*_record.addRecord(true, "Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")");*/
 						dispatchEvent(new DataEvent(DataEvent.RECEIVE_DATA, false, false, null, jsonObj.t, jsonObj.df, jsonObj.dt));
 					}
 				}

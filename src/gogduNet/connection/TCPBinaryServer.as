@@ -799,8 +799,8 @@ package gogduNet.connection
 			
 			if(bool == false)
 			{
-				_record.addRecord("Sensed unpermitted connection(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(address:" + socket.remoteAddress + 
-					", port:" + socket.remotePort + ")", true);
+				_record.addRecord(true, "Sensed unpermitted connection(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(address:" + socket.remoteAddress + 
+					", port:" + socket.remotePort + ")");
 				dispatchEvent( new GogduNetEvent(GogduNetEvent.UNPERMITTED_CONNECTION, false, false, {address:socket.remoteAddress, port:socket.remotePort}) );
 				socket.close();
 				return;
@@ -1010,8 +1010,8 @@ package gogduNet.connection
 							data.writeBytes( packetBytes, packetBytes.position, size );
 							data.position = 0;
 							
-							/*_record.addRecord("Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
-								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);*/
+							/*_record.addRecord(true, "Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
+								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")");*/
 							
 							dispatchEvent( new DataEvent(DataEvent.RECEIVE_DATA, false, false, 
 								socket.id, DataType.BYTES, protocol, data) );

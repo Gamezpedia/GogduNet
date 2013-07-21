@@ -329,7 +329,7 @@ package gogduNet.connection
 			_timer.stop();
 			_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
 			
-			_record.addRecord("Connection to close(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")", true);
+			_record.addRecord(true, "Connection to close(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")");
 			_isConnected = false;
 		}
 		
@@ -934,7 +934,7 @@ package gogduNet.connection
 			// 연결에 실패한 경우
 			if(code == "NetConnection.Connect.Failed" || code == "NetGroup.Connect.Failed")
 			{
-				_record.addRecord("ConnectFailed(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(code:" + code + ")", true);
+				_record.addRecord(true, "ConnectFailed(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(code:" + code + ")");
 				_isConnected = true; //close 함수의 if(_isConnected == false){return;} 때문에
 				close();
 				
@@ -945,7 +945,7 @@ package gogduNet.connection
 			else if(code == "NetConnection.Connect.AppShutdown" || code == "NetConnection.Connect.InvalidApp" || 
 				code == "NetConnection.Connect.Rejected" || code == "NetConnection.Connect.IdleTimeout")
 			{
-				_record.addRecord("Disconnected(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(code:" + code + ")", true);
+				_record.addRecord(true, "Disconnected(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(code:" + code + ")");
 				close();
 				
 				dispatchEvent( new GogduNetEvent(GogduNetEvent.CLOSE, false, false, code) );
@@ -972,7 +972,7 @@ package gogduNet.connection
 				_timer.addEventListener(TimerEvent.TIMER, _timerFunc);
 				
 				_isConnected = true;
-				_record.addRecord("Connected(connectedTime:" + _connectedTime + ")", true);
+				_record.addRecord(true, "Connected(connectedTime:" + _connectedTime + ")");
 				
 				dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT, false, false, code) );
 				return;
@@ -1001,7 +1001,7 @@ package gogduNet.connection
 				
 				if(bool == false)
 				{
-					_record.addRecord("Sensed unpermitted connection(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(peerID:" + info.peerID + ")", true);
+					_record.addRecord(true, "Sensed unpermitted connection(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(peerID:" + info.peerID + ")");
 					dispatchEvent( new GogduNetEvent(GogduNetEvent.UNPERMITTED_CONNECTION, false, false, info.peerID) );
 					return;
 				}
@@ -1011,7 +1011,7 @@ package gogduNet.connection
 				//해당 피어와의 연결을 갱신
 				peer.updateLastReceivedTime();
 				
-				_record.addRecord("Neighbor connected(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + peer.id + ", peerID:" + info.peerID + ")", true);
+				_record.addRecord(true, "Neighbor connected(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + peer.id + ", peerID:" + info.peerID + ")");
 				
 				dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CONNECT, false, false, peer.id) );
 			}
@@ -1051,7 +1051,7 @@ package gogduNet.connection
 			
 			if(bool == false)
 			{
-				_record.addRecord("Sensed unpermitted connection(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(peerID:" + ns.farID + ")", true);
+				_record.addRecord(true, "Sensed unpermitted connection(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(peerID:" + ns.farID + ")");
 				dispatchEvent( new GogduNetEvent(GogduNetEvent.UNPERMITTED_CONNECTION, false, false, ns.farID) );
 				ns.close();
 				return;
@@ -1161,7 +1161,7 @@ package gogduNet.connection
 				// 일정 시간 이상 전송이 오지 않을 경우 접속이 끊긴 것으로 간주하여 이쪽에서도 접속을 끊는다.
 				if(peer.elapsedTimeAfterLastReceived > _connectionDelayLimit)
 				{
-					_record.addRecord("Close connection to peer(NoResponding)(id:" + peer.id + ", peerID:" + peer.peerID + ")", true);
+					_record.addRecord(true, "Close connection to peer(NoResponding)(id:" + peer.id + ", peerID:" + peer.peerID + ")");
 					
 					dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, peer.peerID) );
 					
@@ -1184,8 +1184,8 @@ package gogduNet.connection
 			// 필요 없는 잉여 패킷(잘못 전달되었거나 악성 패킷)이 있으면 제거한다.
 			if(FILTER_REG_EXP.test(jsonStr) == true)
 			{
-				_record.addRecord("Sensed surplus packets(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
-					peer.id + ", peerID:" + peer.peerID + ")(str:" + backupStr + ")", true);
+				_record.addRecord(true, "Sensed surplus packets(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
+					peer.id + ", peerID:" + peer.peerID + ")(str:" + backupStr + ")");
 				
 				dispatchEvent( new DataEvent(DataEvent.INVALID_PACKET, false, false, id, DataType.INVALID, "Surplus", backupStr) );
 				jsonStr.replace(FILTER_REG_EXP, "");
@@ -1197,8 +1197,8 @@ package gogduNet.connection
 			// 만약 패킷이 없거나 1개보다 많을 경우
 			if(regArr.length == 0 || regArr.length > 1)
 			{
-				_record.addRecord("Sensed wrong packets(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
-					peer.id + ", peerID:" + peer.peerID + ")(str:" + backupStr + ")", true);
+				_record.addRecord(true, "Sensed wrong packets(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
+					peer.id + ", peerID:" + peer.peerID + ")(str:" + backupStr + ")");
 				
 				dispatchEvent( new DataEvent(DataEvent.INVALID_PACKET, false, false, id, DataType.INVALID, "Wrong", backupStr) );
 				return;
@@ -1210,8 +1210,8 @@ package gogduNet.connection
 			// 패킷에 오류가 있으면
 			if(obj == null)
 			{
-				_record.addRecord("Sensed wrong packets(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
-					peer.id + ", peerID:" + peer.peerID + ")(str:" + regArr[0] + ")", true);
+				_record.addRecord(true, "Sensed wrong packets(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
+					peer.id + ", peerID:" + peer.peerID + ")(str:" + regArr[0] + ")");
 				dispatchEvent(new DataEvent(DataEvent.INVALID_PACKET, false, false, id, DataType.INVALID, "Wrong", regArr[0]));
 				return;
 			}
@@ -1220,14 +1220,14 @@ package gogduNet.connection
 			{
 				if(obj.t == DataType.DEFINITION)
 				{
-					/*_record.addRecord("Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
-						peer.id + ", peerID:" + peer.peerID + ")", true);*/
+					/*_record.addRecord(true, "Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
+						peer.id + ", peerID:" + peer.peerID + ")");*/
 					dispatchEvent(new DataEvent(DataEvent.RECEIVE_DATA, false, false, id, obj.t, obj.df, null));
 				}
 				else
 				{
-					/*_record.addRecord("Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
-						peer.id + ", peerID:" + peer.peerID + ")", true);*/
+					/*_record.addRecord(true, "Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")(id:" + 
+						peer.id + ", peerID:" + peer.peerID + ")");*/
 					dispatchEvent(new DataEvent(DataEvent.RECEIVE_DATA, false, false, id, obj.t, obj.df, obj.dt));
 				}
 			}

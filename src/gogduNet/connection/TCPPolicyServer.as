@@ -27,6 +27,10 @@ package gogduNet.connection
 	
 	/** 정책 파일 전송용 TCP 서버입니다. 이 서버에 연결한 소켓에게 정책 파일 문자열을 전송하며,
 	 * 일정 시간 뒤에 자동으로 연결을 끊습니다.
+	 * 
+	 * @langversion 3.0
+	 * @playerversion AIR 3.0 Desktop
+	 * @playerversion AIR 3.8
 	 */
 	public class TCPPolicyServer extends ClientBase
 	{
@@ -164,7 +168,7 @@ package gogduNet.connection
 			_socket.listen();
 			_socket.addEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
 			_socket.addEventListener(Event.CLOSE, _close);
-			_record.addRecord("Opened server(runnedTime:" + _runnedTime + ")", true);
+			_record.addRecord(true, "Opened server(runnedTime:" + _runnedTime + ")");
 		}
 		
 		/** 운영체제에 의해 소켓이 닫힘 */
@@ -174,7 +178,7 @@ package gogduNet.connection
 			_socket.removeEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
 			_socket.removeEventListener(Event.CLOSE, _close);
 			
-			_record.addRecord("Closed server by OS(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")", true);
+			_record.addRecord(true, "Closed server by OS(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")");
 			_run = false;
 			dispatchEvent(new GogduNetEvent(GogduNetEvent.CLOSE));
 		}
@@ -192,7 +196,7 @@ package gogduNet.connection
 			_socket.removeEventListener(Event.CLOSE, _close);
 			_socket = new ServerSocket(); //ServerSocket is non reusable after ServerSocket.close()
 			
-			_record.addRecord("Closed server(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")", true);
+			_record.addRecord(true, "Closed server(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")");
 			_run = false;
 		}
 		
@@ -219,15 +223,15 @@ package gogduNet.connection
 			
 			if(bool == false)
 			{
-				_record.addRecord("Sensed unpermitted connection(address:" + socket.remoteAddress + 
-					", port:" + socket.remotePort + ")", true);
+				_record.addRecord(true, "Sensed unpermitted connection(address:" + socket.remoteAddress + 
+					", port:" + socket.remotePort + ")");
 				dispatchEvent( new GogduNetEvent(GogduNetEvent.UNPERMITTED_CONNECTION, false, false, {address:socket.remoteAddress, port:socket.remotePort}) );
 				socket.close();
 				return;
 			}
 			
 			e.socket.addEventListener(ProgressEvent.SOCKET_DATA, _onSocketData);
-			_record.addRecord("Client connected(address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")", true);
+			_record.addRecord(true, "Client connected(address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")");
 			dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CONNECT, false, false, {address:socket.remoteAddress, port:socket.remotePort}) );
 		}
 		
@@ -244,7 +248,7 @@ package gogduNet.connection
 			//5초 뒤에 자동으로 소켓과의 연결을 끊는다.
 			setTimeout(_closeSocket, 5000, socket);
 			
-			/*_record.addRecord("Send policy file(address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")", true);*/
+			/*_record.addRecord(true, "Send policy file(address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")");*/
 		}
 		
 		/** 소켓의 연결을 끊음 */
@@ -257,7 +261,7 @@ package gogduNet.connection
 			}
 			catch(e:Error)
 			{
-				_record.addErrorRecord(e, "It occurred from forced close connection", true);
+				_record.addErrorRecord(true, e, "It occurred from forced close connection");
 			}
 		}
 	} // class

@@ -1,3 +1,4 @@
+/* made by Siyania (siyania@naver.com)(http://siyania.blog.me/) */
 package gogduNet.connection
 {
 	import flash.events.EventDispatcher;
