@@ -1,12 +1,12 @@
 ﻿package gogduNet.utils
 {
-	//import flash.filesystem.File;
+	import flash.filesystem.File;
 	import flash.utils.ByteArray;
 	import flash.utils.getTimer;
 	
 	public class RecordConsole
 	{
-		public static const MAX_LENGTH:int = 1000000000;
+		public static const MAX_LENGTH:int = 10000000000;
 		
 		private var _record:String;
 		private var _garbageRecords:Vector.<String>;
@@ -15,7 +15,7 @@
 		public function RecordConsole()
 		{
 			_record = '';
-			addRecord('Start recording.', true);
+			addRecord(true, 'Start recording.');
 			_garbageRecords = new Vector.<String>();
 			_byteRecords = new Vector.<ByteArray>();
 		}
@@ -27,7 +27,7 @@
 			_byteRecords = null;
 		}
 		
-		public function addRecord(value:String, appendDate:Boolean=false):String
+		public function addRecord(appendDate:Boolean, ...strings):String
 		{
 			if(_record.length > MAX_LENGTH)
 			{
@@ -35,48 +35,54 @@
 				_record = "-Automatically cleared record. previous record is in 'garbageRecords'.\n";
 			}
 			
-			var str:String;
+			var str:String = "";
+			var i:uint;
+			
+			for(i = 0; i < strings.length; i += 1)
+			{
+				str += String(strings) + " ";
+			}
 			
 			if(appendDate == true)
 			{
 				var date:Date = new Date();
-				str =(date.fullYear + '/' + (date.month+1) + '/' + date.date + '/' + date.hours + ':' + date.minutes + ':' + date.seconds) + "(runningTime:" + getTimer() + ") " + value;
+				str =(date.fullYear + '/' + (date.month+1) + '/' + date.date + '/' + date.hours + ':' + date.minutes + ':' + date.seconds) + "(runningTime:" + getTimer() + ") " + str;
 			}
 			else
 			{
-				str = value;
+				str = str;
 			}
 			
 			_record += '-' + str + '\n';
 			return str;
 		}
 		
-		public function addByteRecord(bytes:ByteArray, appendDate:Boolean=false):uint
+		public function addByteRecord(appendDate:Boolean, bytes:ByteArray):uint
 		{
-			var i:uint = _byteRecords.push(bytes);
-			addRecord('Bytes are added. that is at byteRecords[index:' + String(i) + '](length:' + _byteRecords.length + ')', appendDate);
+			var i:uint = _byteRecords.push(bytes) - 1;
+			addRecord(appendDate, "Bytes are added. it is in 'byteRecords' (index:" + String(i) + ")");
 			return i;
 		}
 		
-		public function addErrorRecord(error:Error, descript:String, appendDate:Boolean=false):String
+		public function addErrorRecord(appendDate:Boolean, error:Error, descript:String=""):String
 		{
-			var str:String = addRecord("Error(id:" + String(error.errorID) + ", name:" + error.name + ", message:" + error.message +
-										")(toStr:" + error.toString() + ")(descript:" + descript + ")", appendDate);
+			var str:String = addRecord(appendDate, "Error(id:" + String(error.errorID) + ", name:" + error.name + ", message:" + error.message +
+				")(toStr:" + error.toString() + ")(descript:" + descript + ")");
 			return str;
 		}
 		
 		public function clearRecord():void{
 			_record ='';
-			addRecord('Records are cleared', true);
+			addRecord(true, 'Records are cleared');
 		}
 		
 		public function clearGarbageRecords():void{
-			addRecord('GarbageRecords are cleared', true);
+			addRecord(true, 'GarbageRecords are cleared');
 			_garbageRecords.length =0;
 		}
 		
 		public function clearByteRecords():void{
-			addRecord('ByteRecords are clearred', true);
+			addRecord(true, 'ByteRecords are clearred');
 			_byteRecords.length =0;
 		}
 		
@@ -95,8 +101,8 @@
 			return _byteRecords;
 		}
 		
-		//for AIR
-		/*public function saveRecord(url:String, addGarbageRecord:Boolean=true, addByteRecord:Boolean=true):void
+		/** for AIR */
+		public function saveRecord(url:String, addGarbageRecord:Boolean=true, addByteRecord:Boolean=true):void
 		{
 			var str:String = "[Records]";
 			var i:uint;
@@ -110,18 +116,24 @@
 			}
 			
 			str += _record;
-			str += "\n\n[ByteRecords]"
 			
 			if(addByteRecord == true)
 			{
+				str += "\n\n[ByteRecords(Base64)]";
+				
 				for(i = 0; i < _byteRecords.length; i += 1)
 				{
-					str += "[" + i + "] " + String(_byteRecords[i]);
+					str += "[" + i + "] " + Base64.encode(_byteRecords[i]);
 				}
 			}
 			
 			var file:File = new File(url);
 			file.save(str);
-		}*/
+		}
+		
+		public function toString():String
+		{
+			return _record;
+		}
 	}
 }

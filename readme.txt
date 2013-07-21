@@ -1,6 +1,6 @@
 ﻿GogduNet - AS3 Communication Library
 for TCP and UDP and P2P
-Version 1.10 (2013.7.8.)
+Version 2.00 (2013.7.20.)
 
 Made by Siyania
 (siyania@naver.com)
@@ -10,14 +10,16 @@ Me : "愛してる、ミク！”
 God : "きもい…”
 Me : ”うるさい！神くせに！”
 
-(TCP) GogduNetServer : AIR 3.0 Desktop, AIR 3.8
-(TCP) GogduNetClient : Flash Player 11, AIR 3.0
+TCPServer : AIR 3.0 Desktop, AIR 3.8
 
-(TCP) GogduNetPolicyServer : AIR 3.0 Desktop, AIR 3.8
+TCPClient : Flash Player 11, AIR 3.0
 
-(TCP) GogduNetBinaryServer : AIR 3.0 Desktop, AIR 3.8
-(TCP) GogduNetBinaryClient : Flash Player 11, AIR 3.0
+TCPPolicyServer : AIR 3.0 Desktop, AIR 3.8
 
-(UCP) GogduNetUDPClient : AIR 3.0 Desktop, AIR 3.8
+TCPBinaryServer : AIR 3.0 Desktop, AIR 3.8
 
-(P2P) GogduNetP2PClient : Flash Player 11, AIR 3.0
+TCPBinaryClient : Flash Player 11, AIR 3.0
+
+UDPClient : AIR 3.0 Desktop, AIR 3.8
+
+P2PClient : Flash Player 11, AIR 3.0

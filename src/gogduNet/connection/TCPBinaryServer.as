@@ -1,7 +1,6 @@
-package gogduNet.sockets
+package gogduNet.connection
 {
 	import flash.events.Event;
-	import flash.events.EventDispatcher;
 	import flash.events.ServerSocketConnectEvent;
 	import flash.events.TimerEvent;
 	import flash.net.ServerSocket;
@@ -12,69 +11,81 @@ package gogduNet.sockets
 	import flash.utils.getTimer;
 	import flash.utils.setTimeout;
 	
-	import gogduNet.utils.ObjectPool;
-	import gogduNet.utils.RandomID;
-	
-	import gogduNet.events.GogduNetDataEvent;
-	import gogduNet.events.GogduNetSocketEvent;
-	import gogduNet.sockets.DataType;
-	import gogduNet.sockets.GogduNetSocket;
+	import gogduNet.connection.TCPSocket;
+	import gogduNet.events.DataEvent;
+	import gogduNet.events.GogduNetEvent;
+	import gogduNet.utils.DataType;
 	import gogduNet.utils.Encryptor;
+	import gogduNet.utils.ObjectPool;
 	import gogduNet.utils.RecordConsole;
+	import gogduNet.utils.SocketSecurity;
+	import gogduNet.utils.makePacket;
+	import gogduNet.utils.parsePacket;
 	
-	/** 허용되지 않은 대상에게서 정보가 전송되면 발생 */
-	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetSocketEvent")]
-	/** 운영체제 등에 의해 비자발적으로 연결이 끊긴 경우 발생 */
-	[Event(name="close", type="flash.events.Event")]
-	/** 특정 소켓이 성공적으로 접속한 경우 발생 */
-	[Event(name="connect", type="gogduNet.events.GogduNetSocketEvent")]
-	/** 특정 소켓의 연결 시도가 실패한 경우 발생 */
-	[Event(name="connectFailed", type="gogduNet.events.GogduNetSocketEvent")]
+	/** 허용되지 않은 대상에게서 정보가 전송되면 발생
+	 * </br>( data:{address:대상의 address, port:대상의 포트} )
+	 */
+	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
+	/** 운영체제 등에 의해 비자발적으로 서버가 닫힌 경우 발생(close() 함수로는 발생하지 않는다) */
+	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
+	/** 특정 소켓이 성공적으로 접속한 경우 발생
+	 * </br>(data:소켓의 id)
+	 */
+	[Event(name="socketConnect", type="gogduNet.events.GogduNetEvent")]
+	/** 특정 소켓의 연결 시도가 서버 최대 인원 초과로 인해 실패한 경우에 발생한다.
+	 * 연결 실패한 소켓은 바로 끊기지 않으며, 실패했음을 알리는 패킷을 전송한 후 잠깐의 시간 뒤에 자동으로 끊는다.
+	 * ( 실패한 소켓의 클라이언트에선 GogduNetEvent.CONNECT_FAIL 이벤트가 발생하지 않는다.
+	 * 오히려 인원 초과 검사를 위해 잠깐 동안 연결이 되었으므로 GogduNetEvent.CONNECT 이벤트가 발생하고 잠시 뒤에 GogduNetEvent.CLOSE 이벤트가 발생한다.
+	 * 단지 실패했음을 알리는 Definition 데이터를 전송 받을 뿐이다.(dataDefinition:Connect.Fail.Saturation) )
+	 * </br>( data:{address:실패한 소켓의 address, port:실패한 소켓의 포트} )
+	 */
+	[Event(name="socketConnectFail", type="gogduNet.events.GogduNetEvent")]
 	/** 연결이 업데이트(정보를 수신)되면 발생 */
-	[Event(name="connectionUpdated", type="gogduNet.events.GogduNetSocketEvent")]
-	/** 특정 소켓의 연결이 끊긴 경우 발생 */
-	[Event(name="close", type="gogduNet.events.GogduNetSocketEvent")]
-	/** 데이터를 완전히 수신했을 때 발생. 데이터는 이벤트로 전달된다. */
-	[Event(name="receiveData", type="gogduNet.events.GogduNetDataEvent")]
+	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
+	/** 특정 소켓과의 연결이 비자발적으로 끊긴 경우 발생(closeSocket() 함수로는 발생하지 않는다)
+	 * </br>( data:{id:끊긴 소켓의 id, address:끊긴 소켓의 address, port:끊긴 소켓의 포트} )
+	 */
+	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
+	/** 정상적인 데이터를 완전히 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
+	 * </br>(id:데이터를 보낸 소켓의 id, dataType:DataType.BYTES, dataDefinition, data)
+	 */
+	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
 	/** 데이터를 전송 받는 중일 때 발생. 지금까지 전송 받은 데이터가 이벤트로 전달된다.
 	 * (dataDefinition 속성이 존재하면 사용자가 보낸 (헤더와 프로토콜을 제외한)실질적인 데이터의 전송 상태를
 	 * data 속성으로 전달하며, dataDefinition 속성이 존재하지 않으면(null)
 	 * 아직 헤더나 프로토콜이 다 전송되지 않은 걸 의미하며, 헤더와 프로토콜이 포함된 바이트 배열이 전달된다)</br>
-	 * (데이터의 크기가 적어 너무 빨리 다 받은 경우엔 이 이벤트가 발생하지 않을 수도 있다.)*/
-	[Event(name="progressData", type="gogduNet.events.GogduNetDataEvent")]
-	/** 정상적이지 않은 데이터를 수신했을 때 발생 */
-	//[Event(name="invalidPacket", type="gogduNet.events.GogduNetDataEvent")]
-	
-	/** <p>2진 데이터 전송용 TCP 서버. 파일을 전송하는 데에 쓸 수 있다.</p>
-	 * <strong>패킷의 형태</strong>
-	 * <p>굳이 알 필요는 없지만, 조금 수정해서 사용할 거라면 참고.</p>
-	 * <p>Data Type은 DataType.BYTES로 고정.</p>
-	 * <p>4 byte - 4 byte - variable(가변적) byte - variable byte</p>
-	 * 	<ol>
-	 * 		<li>4 byte (uint) : data size</li>
-	 * 		<li>4 byte (uint) : protocol length</li>
-	 * 		<li>variable byte : protocol string (protocol length 만큼의 길이를 가진다)</li>
-	 * 		<li>variable byte : data (헤더와 프로토콜(definition)을 포함하지 않은 데이터. data size 만큼의 길이를 가진다)</li>
-	 * 	</ol>
+	 * (데이터의 크기가 적어 너무 빨리 다 받은 경우엔 이 이벤트가 발생하지 않을 수도 있다.)
+	 * </br>(id:데이터를 보낸 소켓의 id, dataType:DataType.BYTES, dataDefinition:null or String, data:null or ByteArray)
 	 */
-	public class GogduNetBinaryServer extends EventDispatcher
+	[Event(name="progressData", type="gogduNet.events.DataEvent")]
+	
+	/** 2진 파일 전송용 TCP 서버입니다. 한 번에 최대 4기가의 데이터를 전송할 수 있으며, 수신 진행 상황을
+	 * 이벤트로 알려주므로 파일 전송용으로 사용하기 좋습니다. 주의할 점으로 전송할 데이터의 크기(용량)이 큰 경우,
+	 * TCP의 특성상 하나의 연결(하나의 TCPBinaryClient 객체)에선 한 번에 하나의 데이터만 전송하는 것이 좋습니다.
+	 * (이전의 데이터가 모두 전송되기 전에 다른 데이터를 다시 전송하지 마세요)</br>
+	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
+	 * 
+	 * @langversion 3.0
+	 * @playerversion AIR 3.0 Desktop
+	 * @playerversion AIR 3.8
+	 */
+	public class TCPBinaryServer extends ClientBase
 	{
+		/** 내부적으로 정보 수신과 연결 검사용으로 사용하는 타이머 */
 		private var _timer:Timer;
 		
-		// 서버 설정
 		/** 최대 연결 지연 한계 **/
 		private var _connectionDelayLimit:Number;
 		
 		/** 서버 소켓 */
-		private var _serverSocket:ServerSocket;
+		private var _socket:ServerSocket;
 		/** 서버 address */
-		private var _serverAddress:String;
+		private var _address:String;
 		/** 서버 포트 */
-		private var _serverPort:int;
+		private var _port:int;
 		/** 서버 인코딩 유형(기본값="UTF-8") */
 		private var _encoding:String;
 		
-		// 서버 상태
 		/** 서버가 실행 중인지를 나타내는 bool 값 */
 		private var _run:Boolean;
 		/** 서버가 시작된 지점의 시간을 나타내는 변수 */
@@ -82,91 +93,91 @@ package gogduNet.sockets
 		/** 마지막으로 통신한 시각(정확히는 마지막으로 정보를 전송 받은 시각) */
 		private var _lastReceivedTime:Number;
 		/** 최대 인원 */
-		private var _maxSockets:uint;
+		private var _maxSockets:int;
 		/** 디버그용 기록 */
 		private var _record:RecordConsole;
 		
 		/** 클라이언트 소켓 배열 */
-		private var _socketArray:Vector.<GogduNetSocket>;
+		private var _socketArray:Vector.<TCPSocket>;
 		/** 소켓 객체의 id를 주소값으로 사용하여 저장하는 객체 */
 		private var _idTable:Object;
 		
-		private var _event:GogduNetSocketEvent;
+		/** GogduNetEvent.CONNECTION_UPDATE 이벤트 객체 */
+		private var _event:GogduNetEvent;
 		
-		/** 중복되지 않는 ID를 발급해 주는 RandomID 객체 */
-		private var _randomID:RandomID;
 		/** 소켓용 풀 */
 		private var _socketPool:ObjectPool;
-		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 GogduNetConnectionSecurity 타입 객체 */
-		private var _connectionSecurity:GogduNetConnectionSecurity;
+		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체 */
+		private var _socketSecurity:SocketSecurity;
 		
 		/** <p>serverAddress : 서버로 사용할 address</p>
 		 * <p>serverPort : 서버로 사용할 포트</p>
-		 * <p>maxSockets : 최대 인원 수 제한</p>
+		 * <p>maxSockets : 최대 인원 수 제한. 음수로 설정한 경우 따로 제한을 두지 않음. </p>
 		 * <p>timerInterval : 정보 수신과 연결 검사를 할 때 사용할 타이머의 반복 간격(ms)</p>
 		 * <p>connectionDelayLimit : 연결 지연 한계(ms)(여기서 설정한 시간 동안 소켓으로부터 데이터가 오지 않으면 그 소켓과는 연결이 끊긴 것으로 간주한다.)</p>
 		 * <p>encoding : 프로토콜 문자열의 변환에 사용할 인코딩 형식</p>
 		 */
-		public function GogduNetBinaryServer(serverAddress:String="0.0.0.0", serverPort:int=0, maxSockets:uint=10, connectionSecurity:GogduNetConnectionSecurity=null, timerInterval:Number=100,
-									   connectionDelayLimit:Number=10000, encoding:String="UTF-8")
+		public function TCPBinaryServer(serverAddress:String="0.0.0.0", serverPort:int=0, maxSockets:int=10, socketSecurity:SocketSecurity=null, timerInterval:Number=100,
+										connectionDelayLimit:Number=10000, encoding:String="UTF-8")
 		{
 			_timer = new Timer(timerInterval);
 			_connectionDelayLimit = connectionDelayLimit;
-			_serverSocket = new ServerSocket();
-			_serverAddress = serverAddress;
-			_serverPort = serverPort;
+			_socket = new ServerSocket();
+			
+			_address = serverAddress;
+			_port = serverPort;
+			
 			_encoding = encoding;
 			_run = false;
 			_runnedTime = -1;
 			_lastReceivedTime = -1;
 			_maxSockets = maxSockets;
 			_record = new RecordConsole();
-			_socketArray = new Vector.<GogduNetSocket>();
-			_idTable = new Object();
-			_event = new GogduNetSocketEvent(GogduNetSocketEvent.CONNECTION_UPDATED, false, false, null, null, null);
-			_randomID = new RandomID();
-			_socketPool = new ObjectPool(GogduNetSocket);
+			_socketArray = new Vector.<TCPSocket>();
+			_idTable = {};
 			
-			if(connectionSecurity == null)
+			_event = new GogduNetEvent(GogduNetEvent.CONNECTION_UPDATE, false, false, null);
+			_socketPool = new ObjectPool(TCPSocket);
+			
+			if(socketSecurity == null)
 			{
-				connectionSecurity = new GogduNetConnectionSecurity(false);
+				socketSecurity = new SocketSecurity(false);
 			}
-			_connectionSecurity = connectionSecurity;
+			_socketSecurity = socketSecurity;
 		}
 		
-		/** 서버 실행용 타이머의 재생 간격을 가져온다. */
+		/** 내부적으로 정보 수신이나 연결 검사 등을 위해 사용되는 타이머의 재생 간격을 가져오거나 설정한다.(ms) */
 		public function get timerInterval():Number
 		{
 			return _timer.delay;
 		}
-		/** 서버 실행용 타이머의 재생 간격을 설정한다. */
 		public function set timerInterval(value:Number):void
 		{
 			_timer.delay = value;
 		}
 		
-		/** 연결 지연 한계를 가져온다.(ms) */
+		/** 연결 지연 한계 시간을 가져오거나 설정한다.(ms)
+		 * 이 시간을 넘도록 정보가 수신되지 않은 경우엔 연결이 끊긴 것으로 간주하고 이쪽에서도 연결을 끊는다.
+		 */
 		public function get connectionDelayLimit():Number
 		{
 			return _connectionDelayLimit;
 		}
-		/** 연결 지연 한계를 설정한다.(ms) */
 		public function set connectionDelayLimit(value:Number):void
 		{
 			_connectionDelayLimit = value;
 		}
 		
-		// setter, getter
-		/** 소켓을 가져온다. */
-		public function get serverSocket():ServerSocket
+		/** 플래시 네이티브 서버 소켓을 가져온다. */
+		public function get socket():ServerSocket
 		{
-			return _serverSocket;
+			return _socket;
 		}
 		
 		/** 서버의 address를 가져오거나 설정한다. 설정은 서버가 실행되고 있지 않을 때에만 할 수 있다. */
 		public function get address():String
 		{
-			return _serverAddress;
+			return _address;
 		}
 		public function set address(value:String):void
 		{
@@ -175,13 +186,13 @@ package gogduNet.sockets
 				return;
 			}
 			
-			_serverAddress =value;
+			_address = value;
 		}
 		
 		/** 서버의 포트를 가져오거나 설정한다. 설정은 서버가 실행되고 있지 않을 때에만 할 수 있다. */
 		public function get port():int
 		{
-			return _serverPort;
+			return _port;
 		}
 		public function set port(value:int):void
 		{
@@ -190,7 +201,7 @@ package gogduNet.sockets
 				return;
 			}
 			
-			_serverPort =value;
+			_port = value;
 		}
 		
 		/** 서버의 통신 인코딩 유형을 가져오거나 설정한다. 설정은 서버가 실행되고 있지 않을 때에만 할 수 있다. */
@@ -205,7 +216,7 @@ package gogduNet.sockets
 				return;
 			}
 			
-			_encoding =value;
+			_encoding = value;
 		}
 		
 		/** 서버가 실행 중인지를 나타내는 값을 가져온다. */
@@ -215,46 +226,38 @@ package gogduNet.sockets
 		}
 		
 		/** 서버의 최대 인원 제한 수를 가져오거나 설정한다. (이 값은 새로 들어오는 연결에만 영향을 주며, 기존 연결은 끊어지지 않는다.)*/
-		public function get maxSockets():uint
+		public function get maxSockets():int
 		{
 			return _maxSockets;
 		}
-		public function set maxSockets(value:uint):void
+		public function set maxSockets(value:int):void
 		{
-			_maxSockets =value;
+			_maxSockets = value;
 		}
 		
-		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 GogduNetConnectionSecurity 타입 객체를 가져오거나 설정한다. */
-		public function get connectionSecurity():GogduNetConnectionSecurity
+		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 객체를 가져오거나 설정한다. */
+		public function get socketSecurity():SocketSecurity
 		{
-			return _connectionSecurity;
+			return _socketSecurity;
 		}
-		public function set connectionSecurity(value:GogduNetConnectionSecurity):void
+		public function set socketSecurity(value:SocketSecurity):void
 		{
-			_connectionSecurity = value;
+			_socketSecurity = value;
 		}
 		
 		/** 서버의 현재 인원을 가져온다. */
-		public function get currentSockets():uint
+		public function get numSockets():int
 		{
 			return _socketArray.length;
 		}
 		
-		/** 디버그용 기록을 가져온다. 사용자가 명시적으로 RecordConsole.clear() 함수를 실행하는 경우를 제외하면,
-		 * 이 기록은 서버를 닫거나 서버를 다시 시작해도 그대로 남아있다.
-		 * */
+		/** 디버그용 기록을 가지고 있는 RecordConsole 객체를 가져온다. */
 		public function get record():RecordConsole
 		{
 			return _record;
 		}
 		
-		/** 소켓에게 id를 발급해 주는 RandomID 타입의 객체를 가져온다. 서버를 닫을 경우 RandomID.clear() 함수로 초기화된다. */
-		public function get idIssuer():RandomID
-		{
-			return _randomID;
-		}
-		
-		/** 소켓용 Object Pool이다. 서버를 닫을 경우 ObjectPool.clear() 함수로 초기화된다. */
+		/** 소켓용 오브젝트 풀을 가져온다. */
 		public function get socketPool():ObjectPool
 		{
 			return _socketPool;
@@ -288,11 +291,11 @@ package gogduNet.sockets
 			dispatchEvent(_event);
 		}
 		
-		/** address로 소켓을 가져온다. */
-		public function getSocketByAddress(address:String):GogduNetSocket
+		/** 특정 address를 가진 소켓을 가져온다.(같은 address를 가진 소켓이 여러 개 존재할 수도 있다) */
+		public function getSocketByAddress(address:String):TCPSocket
 		{
-			var i:uint;
-			var socket:GogduNetSocket;
+			var i:int;
+			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
 			{
@@ -315,11 +318,11 @@ package gogduNet.sockets
 			return null;
 		}
 		
-		/** 포트로 소켓을 가져온다. */
-		public function getSocketByPort(port:int):GogduNetSocket
+		/** 특정 포트를 가진 소켓을 가져온다.(같은 포트를 가진 소켓이 여러 개 존재할 수도 있다) */
+		public function getSocketByPort(port:int):TCPSocket
 		{
-			var i:uint;
-			var socket:GogduNetSocket;
+			var i:int;
+			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
 			{
@@ -342,11 +345,11 @@ package gogduNet.sockets
 			return null;
 		}
 		
-		/** address와 포트가 모두 일치하는 소켓을 가져온다. */
-		public function getSocketByAddressAndPort(address:String, port:int):GogduNetSocket
+		/** address와 포트가 모두 일치하는 소켓을 가져온다.(유일하다) */
+		public function getSocketByAddressAndPort(address:String, port:int):TCPSocket
 		{
-			var i:uint;
-			var socket:GogduNetSocket;
+			var i:int;
+			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
 			{
@@ -369,58 +372,27 @@ package gogduNet.sockets
 			return null;
 		}
 		
-		/** id로 소켓을 가져온다. */
-		public function getSocketByID(id:String):GogduNetSocket
+		/** id가 일치하는 소켓을 가져온다.(유일하다) */
+		public function getSocketByID(id:String):TCPSocket
 		{
-			if(_idTable[id] && _idTable[id] is GogduNetSocket)
+			if(_idTable[id] && _idTable[id] is TCPSocket)
 			{
 				return _idTable[id];
-			}
-			else
-			{
-				return null;
 			}
 			
 			return null;
 		}
 		
-		/** level로 소켓을 가져온다. */
-		/*public function getSocketByLevel(level:int):GogduNetSocket
-		{
-		var i:uint;
-		var socket:GogduNetSocket;
-		
-		for(i = 0; i < _socketArray.length; i += 1)
-		{
-		if(_socketArray[i] == null)
-		{
-		continue;
-		}
-		socket =_socketArray[i];
-		if(socket.isConnected == false)
-		{
-		continue;
-		}
-		
-		if(socket.level == level)
-		{
-		return socket;
-		}
-		}
-		
-		return null;
-		}*/
-		
 		/** 모든 소켓을 가져온다. 반환되는 배열은 복사된 값이므로 수정하더라도 내부에 있는 원본 배열은 바뀌지 않는다. */
-		public function getSockets(resultVector:Vector.<GogduNetSocket>=null):Vector.<GogduNetSocket>
+		public function getSockets(resultVector:Vector.<TCPSocket>=null):Vector.<TCPSocket>
 		{
 			if(resultVector == null)
 			{
-				resultVector = new Vector.<GogduNetSocket>();
+				resultVector = new Vector.<TCPSocket>();
 			}
 			
-			var i:uint;
-			var socket:GogduNetSocket;
+			var i:int;
+			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
 			{
@@ -440,16 +412,16 @@ package gogduNet.sockets
 			return resultVector;
 		}
 		
-		/** address로 소켓들을 가져온다. */
-		public function getSocketsByAddress(address:String, resultVector:Vector.<GogduNetSocket>=null):Vector.<GogduNetSocket>
+		/** address가 일치하는 소켓들을 가져온다. */
+		public function getSocketsByAddress(address:String, resultVector:Vector.<TCPSocket>=null):Vector.<TCPSocket>
 		{
 			if(resultVector == null)
 			{
-				resultVector = new Vector.<GogduNetSocket>();
+				resultVector = new Vector.<TCPSocket>();
 			}
 			
-			var i:uint;
-			var socket:GogduNetSocket;
+			var i:int;
+			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
 			{
@@ -472,16 +444,16 @@ package gogduNet.sockets
 			return resultVector;
 		}
 		
-		/** 포트로 소켓들을 가져온다. */
-		public function getSocketsByPort(port:int, resultVector:Vector.<GogduNetSocket>=null):Vector.<GogduNetSocket>
+		/** 포트가 일치하는 소켓들을 가져온다. */
+		public function getSocketsByPort(port:int, resultVector:Vector.<TCPSocket>=null):Vector.<TCPSocket>
 		{
 			if(resultVector == null)
 			{
-				resultVector = new Vector.<GogduNetSocket>();
+				resultVector = new Vector.<TCPSocket>();
 			}
 			
-			var i:uint;
-			var socket:GogduNetSocket;
+			var i:int;
+			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
 			{
@@ -505,15 +477,15 @@ package gogduNet.sockets
 		}
 		
 		/** address와 포트가 모두 일치하는 소켓들을 가져온다. */
-		public function getSocketsByAddressAndPort(address:String, port:int, resultVector:Vector.<GogduNetSocket>=null):Vector.<GogduNetSocket>
+		/*public function getSocketsByAddressAndPort(address:String, port:int, resultVector:Vector.<TCPSocket>=null):Vector.<TCPSocket>
 		{
 			if(resultVector == null)
 			{
-				resultVector = new Vector.<GogduNetSocket>();
+				resultVector = new Vector.<TCPSocket>();
 			}
 			
-			var i:uint;
-			var socket:GogduNetSocket;
+			var i:int;
+			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
 			{
@@ -534,44 +506,11 @@ package gogduNet.sockets
 			}
 			
 			return resultVector;
-		}
-		
-		/** level로 소켓들을 가져온다. */
-		/*public function getSocketsByLevel(level:int, resultVector:Vector.<GogduNetSocket>=null):Vector.<GogduNetSocket>
-		{
-		if(resultVector == null)
-		{
-		resultVector = new Vector.<GogduNetSocket>();
-		}
-		
-		var i:uint;
-		var socket:GogduNetSocket;
-		
-		for(i = 0; i < _socketArray.length; i += 1)
-		{
-		if(_socketArray[i] == null)
-		{
-		continue;
-		}
-		socket =_socketArray[i];
-		if(socket.isConnected == false)
-		{
-		continue;
-		}
-		
-		if(socket.level == level)
-		{
-		resultVector.push(socket);
-		}
-		}
-		
-		return resultVector;
 		}*/
 		
-		// public function
 		public function dispose():void
 		{
-			var socket:GogduNetSocket;
+			var socket:TCPSocket;
 			
 			while(_socketArray.length > 0)
 			{
@@ -586,26 +525,30 @@ package gogduNet.sockets
 				continue;
 			}
 			
-			_serverSocket.close();
-			_serverSocket.removeEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
-			_serverSocket.removeEventListener(Event.CLOSE, _closedByOS);
+			_socket.close();
+			_socket.removeEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
+			_socket.removeEventListener(Event.CLOSE, _closedByOS);
+			
 			_timer.stop();
 			_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
 			_timer = null;
-			_serverSocket = null;
-			_serverAddress = null;
+			
+			_socket = null;
+			_address = null;
 			_encoding = null;
+			
 			_record.dispose();
 			_record = null;
+			
 			_socketArray = null;
 			_idTable = null;
 			_event = null;
-			_randomID.dispose();
-			_randomID = null;
+			
 			_socketPool.dispose();
 			_socketPool = null;
-			_connectionSecurity.dispose();
-			_connectionSecurity = null;
+			
+			_socketSecurity.dispose();
+			_socketSecurity = null;
 			
 			_run = false;
 		}
@@ -613,30 +556,29 @@ package gogduNet.sockets
 		/** 서버 작동 시작 */
 		public function run():void
 		{
-			if(!_serverAddress || _run == true)
+			if(!_address || _run == true)
 			{
 				return;
 			}
 			
 			_runnedTime = getTimer();
-			_serverSocket.bind(_serverPort, _serverAddress);
-			_serverSocket.listen();
-			_serverSocket.addEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
-			_serverSocket.addEventListener(Event.CLOSE, _closedByOS);
-			//addEventListener(Event.ENTER_FRAME, _timerFunc);
+			_socket.bind(_port, _address);
+			_socket.listen();
+			_socket.addEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
+			_socket.addEventListener(Event.CLOSE, _closedByOS);
 			_timer.start();
 			_timer.addEventListener(TimerEvent.TIMER, _timerFunc);
 			
 			_run = true;
-			_record.addRecord("Opened server(runnedTime:" + _runnedTime + ")", true);
+			_record.addRecord(true, "Opened server(runnedTime:" + _runnedTime + ")");
 		}
 		
 		/** 운영체제에 의해 소켓이 닫힘 */
 		private function _closedByOS():void
 		{
-			_record.addRecord("Closed server by OS(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")", true);
+			_record.addRecord(true, "Closed server by OS(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")");
 			_close();
-			dispatchEvent(new Event(Event.CLOSE));
+			dispatchEvent(new GogduNetEvent(GogduNetEvent.CLOSE));
 		}
 		
 		/** 서버 작동 중지 */
@@ -647,13 +589,13 @@ package gogduNet.sockets
 				return;
 			}
 			
-			_record.addRecord("Closed server(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")", true);
+			_record.addRecord(true, "Closed server(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")");
 			_close();
 		}
 		
 		private function _close():void
 		{
-			var socket:GogduNetSocket;
+			var socket:TCPSocket;
 			
 			while(_socketArray.length > 0)
 			{
@@ -671,32 +613,31 @@ package gogduNet.sockets
 			
 			_socketArray.length = 0;
 			_idTable = {};
-			_randomID.clear();
 			_socketPool.clear();
 			
-			_serverSocket.close();
-			_serverSocket.removeEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
-			_serverSocket.removeEventListener(Event.CLOSE, _close);
-			_serverSocket = new ServerSocket(); //ServerSocket is non reusable after ServerSocket.close()
+			_socket.close();
+			_socket.removeEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
+			_socket.removeEventListener(Event.CLOSE, _close);
+			_socket = new ServerSocket(); //ServerSocket is non reusable after ServerSocket.close()
 			_timer.stop();
 			_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
 			
 			_run = false;
 		}
 		
-		/** 2진 데이터를 전송한다. 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
+		/** 플래시의 네이티브 소켓으로 2진 데이터를 전송한다.
+		 * 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
 		 * 신경 쓸 필요는 없다. 그리고 definition(프로토콜 문자열)은 암호화되어 전송되고, 받았을 때 복호화되어 이벤트로 넘겨진다. 이
-		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)<br/>
+		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)
+		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<br/>
 		 * ( 한 번에 전송할 수 있는 data의 최대 길이는 uint로 표현할 수 있는 최대값인 4294967295(=4GB)이며,
 		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )</br>
-		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.
+		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.)</br>
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않는 등의 이유로 전송이 실패한 경우엔 false를, 그 외엔 true를 반환한다.
 		 */
 		public function sendBytesToNativeSocket(nativeSocket:Socket, definition:String, data:ByteArray=null):Boolean
 		{
-			if(_run == false)
-			{
-				return false;
-			}
+			if(_run == false){return false;}
 			
 			//패킷 생성
 			var packet:ByteArray = new ByteArray();
@@ -728,11 +669,36 @@ package gogduNet.sockets
 			return true;
 		}
 		
-		public function sendBytes(socket:GogduNetSocket, definition:String, data:ByteArray=null):Boolean
+		/** 특정 id를 가진 소켓을 찾아 그 소켓에게 2진 데이터를 전송한다.
+		 * 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
+		 * 신경 쓸 필요는 없다. 그리고 definition(프로토콜 문자열)은 암호화되어 전송되고, 받았을 때 복호화되어 이벤트로 넘겨진다. 이
+		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)
+		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<br/>
+		 * ( 한 번에 전송할 수 있는 data의 최대 길이는 uint로 표현할 수 있는 최대값인 4294967295(=4GB)이며,
+		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )</br>
+		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.)
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이 실패한 경우엔 false를,
+		 * 그 외엔 true를 반환한다.
+		 */
+		public function sendBytes(id:String, definition:String, data:ByteArray=null):Boolean
 		{
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return false;}
+			
 			return sendBytesToNativeSocket(socket.nativeSocket, definition, data);
 		}
 		
+		/** 연결되어 있는 모든 소켓에게 2진 데이터를 전송한다.
+		 * 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
+		 * 신경 쓸 필요는 없다. 그리고 definition(프로토콜 문자열)은 암호화되어 전송되고, 받았을 때 복호화되어 이벤트로 넘겨진다. 이
+		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)
+		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<br/>
+		 * ( 한 번에 전송할 수 있는 data의 최대 길이는 uint로 표현할 수 있는 최대값인 4294967295(=4GB)이며,
+		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )</br>
+		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.)
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 하나의 소켓이라도 전송이
+		 * 실패한 경우엔 false를, 그 외엔 true를 반환한다.
+		 */
 		public function sendBytesToAll(definition:String, data:ByteArray=null):Boolean
 		{
 			if(_run == false)
@@ -741,7 +707,7 @@ package gogduNet.sockets
 			}
 			
 			var i:uint;
-			var socket:GogduNetSocket;
+			var socket:TCPSocket;
 			var tf:Boolean = true;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
@@ -756,7 +722,7 @@ package gogduNet.sockets
 					continue;
 				}
 				
-				if(sendBytes(socket, definition, data) == false)
+				if(sendBytes(socket.id, definition, data) == false)
 				{
 					tf = false;
 				}
@@ -765,10 +731,14 @@ package gogduNet.sockets
 			return tf;
 		}
 		
-		/** socket과의 연결을 끊는다.
+		/** id가 일치하는 소켓과의 연결을 끊는다.
+		 * (해당 소켓의 클라이언트에게 패킷을 전송하여 알리지 않고 바로 끊는다.)
 		 */
-		public function closeSocket(socket:GogduNetSocket):void
+		public function closeSocket(id:String):void
 		{
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return;}
+			
 			socket.removeEventListener(Event.CLOSE, _socketClosed);
 			_idTable[socket.id] = null;
 			
@@ -778,11 +748,10 @@ package gogduNet.sockets
 			_removeSocket(socket);
 		}
 		
-		// private function
 		/** _socketArray에서 socket을 제거한다. 성공적으로 제거한 경우엔 true를,
 		 * _socketArray에 socket이 없어서 제거하지 못한 경우엔 false를 반환한다.
 		 */
-		private function _removeSocket(socket:GogduNetSocket):void
+		private function _removeSocket(socket:TCPSocket):void
 		{
 			var idx:int = _socketArray.indexOf(socket);
 			
@@ -794,6 +763,7 @@ package gogduNet.sockets
 			}
 		}
 		
+		/** 네이티브 소켓과의 연결을 강제로 끊는다. */
 		private function _forcedCloseNativeSocket(nativeSocket:Socket):void
 		{
 			try
@@ -802,7 +772,7 @@ package gogduNet.sockets
 			}
 			catch(e:Error)
 			{
-				_record.addErrorRecord(e, "It occurred from forced closes nativeSocket connection", true);
+				_record.addErrorRecord(true, e, "It occurred from forced closes nativeSocket connection");
 			}
 		}
 		
@@ -812,16 +782,16 @@ package gogduNet.sockets
 			var socket:Socket = e.socket;
 			var bool:Boolean = false;
 			
-			if(_connectionSecurity.isPermission == true)
+			if(_socketSecurity.isPermission == true)
 			{
-				if(_connectionSecurity.contain(socket.remoteAddress, socket.remotePort) == true)
+				if(_socketSecurity.contain(socket.remoteAddress, socket.remotePort) == true)
 				{
 					bool = true;
 				}
 			}
-			else if(_connectionSecurity.isPermission == false)
+			else if(_socketSecurity.isPermission == false)
 			{
-				if(_connectionSecurity.contain(socket.remoteAddress, socket.remotePort) == false)
+				if(_socketSecurity.contain(socket.remoteAddress, socket.remotePort) == false)
 				{
 					bool = true;
 				}
@@ -831,40 +801,26 @@ package gogduNet.sockets
 			{
 				_record.addRecord("Sensed unpermitted connection(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(address:" + socket.remoteAddress + 
 					", port:" + socket.remotePort + ")", true);
-				dispatchEvent(new GogduNetSocketEvent(GogduNetSocketEvent.UNPERMITTED_CONNECTION, false, false, null, socket, null));
+				dispatchEvent( new GogduNetEvent(GogduNetEvent.UNPERMITTED_CONNECTION, false, false, {address:socket.remoteAddress, port:socket.remotePort}) );
 				socket.close();
 				return;
 			}
 			
-			// 잘못된 address로 접속 실패 (필요 없을 수도 있는 기능. 제작자도 이 오류 방지 if문이 필요한지 어떤지 잘 모름.)
-			/*if(socket.remoteAddress == null)
-			{
-			_record.addRecord("What socket is failed connect(InvalidAddress)", true);
-			socket.writeMultiByte(makePacket(DataType.DEFINITION, "GogduNet.Connect.Fail.InvalidAddress"), _encoding);
-			socket.flush();
-			setTimeout(_forcedCloseNativeSocket, 100, socket);
-			
-			dispatchEvent(new GogduNetSocketEvent(GogduNetSocketEvent.CONNECT_FAILED, false, false, null, socket, GogduNetSocketEvent.INFO_INVALID_Address));
-			return;
-			}*/
-			
 			// 사용자 포화로 접속 실패
-			if(currentSockets >= _maxSockets)
+			if(numSockets >= _maxSockets && _maxSockets >= 0)
 			{
-				_record.addRecord("What socket is failed connect(Saturation)(address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")", true);
+				_record.addRecord(true, "What socket is failed connect(Saturation)(address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")");
 				sendBytesToNativeSocket(socket, "GogduNet.Connect.Fail.Saturation", null);
 				setTimeout(_forcedCloseNativeSocket, 100, socket);
 				
-				dispatchEvent(new GogduNetSocketEvent(GogduNetSocketEvent.CONNECT_FAILED, false, false, null, socket, GogduNetSocketEvent.INFO_SATURATION));
+				dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CONNECT_FAIL, false, false, {address:socket.remoteAddress, port:socket.remotePort}) );
 				return;
 			}
 			
 			// 접속 성공
-			var socket2:GogduNetSocket = _socketPool.getInstance() as GogduNetSocket;
+			var socket2:TCPSocket = _socketPool.getInstance() as TCPSocket;
 			socket2.initialize();
-			socket2.setNativeSocket(socket);
-			socket2.setID(_randomID.getID());
-			//socket2.level = 1;
+			socket2._setNativeSocket(socket);
 			
 			_idTable[socket2.id] = socket2;
 			socket2.addEventListener(Event.CLOSE, _socketClosed);
@@ -873,21 +829,20 @@ package gogduNet.sockets
 			
 			sendBytesToNativeSocket(socket, "GogduNet.Connect.Success", null); // socket == socket2.nativeSocket
 			
-			_record.addRecord("Client connected(id:" + socket2.id + ", address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")", true);
+			_record.addRecord(true, "Client connected(id:" + socket2.id + ", address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")");
 			
-			dispatchEvent(new GogduNetSocketEvent(GogduNetSocketEvent.CONNECT, false, false, socket2, socket, null));
+			dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CONNECT, false, false, socket2.id) );
 		}
 		
 		private function _socketClosed(e:Event):void
 		{
-			var socket:GogduNetSocket = e.currentTarget as GogduNetSocket;
-			
+			var socket:TCPSocket = e.currentTarget as TCPSocket;
 			socket.removeEventListener(Event.CLOSE, _socketClosed);
 			
-			_record.addRecord("Connection to client is disconnected(id:" + socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);
+			_record.addRecord(true, "Connection to client is disconnected(id:" + socket.id + ", address:" + socket.address + ", port:" + socket.port + ")");
 			_removeSocket(socket);
 			
-			dispatchEvent(new GogduNetSocketEvent(GogduNetSocketEvent.CLOSE, false, false, socket, socket.nativeSocket, GogduNetSocketEvent.INFO_NORMAL_CLOSE));
+			dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, {id:socket.id, address:socket.address, port:socket.port}) );
 			
 			_idTable[socket.id] = null;
 			socket.nativeSocket.close();
@@ -901,16 +856,19 @@ package gogduNet.sockets
 			_listen();
 		}
 		
-		/** 클라이언트의 접속을 검사. 문제가 있어 연결을 끊은 경우 true, 그렇지 않으면 false를 반환한다. */
-		private function _checkConnect(socket:GogduNetSocket):Boolean
+		/** 클라이언트의 접속을 검사. 문제가 있어 연결을 끊어야 하는 경우 경우 끊고 true, 그렇지 않으면 false를 반환한다. */
+		private function _checkConnect(socket:TCPSocket):Boolean
 		{
+			var id:String = socket.id;
+			
 			if(socket.isConnected == false)
 			{
 				socket.removeEventListener(Event.CLOSE, _socketClosed);
 				_removeSocket(socket);
-				_idTable[socket.id] = null;
 				socket.nativeSocket.close();
 				socket.dispose();
+				
+				_idTable[id] = null;
 				_socketPool.returnInstance(socket);
 				return true;
 			}
@@ -918,10 +876,12 @@ package gogduNet.sockets
 			// 일정 시간 이상 전송이 오지 않을 경우 접속이 끊긴 것으로 간주하여 이쪽에서도 접속을 끊는다.
 			if(socket.elapsedTimeAfterLastReceived > _connectionDelayLimit)
 			{
-				_record.addRecord("Disconnects connection to client(NoResponding)(id:" + socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);
-				sendBytes(socket, "GogduNet.Disconnect.NoResponding", null);
-				closeSocket(socket);
-				dispatchEvent(new GogduNetSocketEvent(GogduNetSocketEvent.CLOSE, false, false, socket, socket.nativeSocket, GogduNetSocketEvent.INFO_ABNORMAL_CLOSE));
+				_record.addRecord(true, "Disconnects connection to client(NoResponding)(id:" + id + ", address:" + socket.address + ", port:" + socket.port + ")");
+				sendBytes(id, "GogduNet.Disconnect.NoResponding", null);
+				
+				dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, {id:id, address:socket.address, port:socket.port}) );
+				
+				closeSocket(id);
 				return true;
 			}
 			
@@ -931,7 +891,7 @@ package gogduNet.sockets
 		/** 정보 수신 */
 		private function _listen():void
 		{
-			var socket:GogduNetSocket;
+			var socket:TCPSocket;
 			var socketInSocket:Socket;
 			var packetBytes:ByteArray; // 패킷을 읽을 때 쓰는 바이트 배열.
 			var bytes:ByteArray; // 패킷을 읽을 때 보조용으로 쓰는 바이트 배열.
@@ -973,6 +933,7 @@ package gogduNet.sockets
 				bytes.position = 0;
 				packetBytes.position = 0;
 				packetBytes.writeBytes(bytes, 0, bytes.length);
+				
 				//만약 AS가 아닌 C# 등과 통신할 경우 엔디안이 다르므로 오류가 날 수 있다. 그걸 방지하기 위함.
 				socketInSocket.endian = Endian.LITTLE_ENDIAN;
 				socketInSocket.readBytes(packetBytes, packetBytes.length, socketInSocket.bytesAvailable);
@@ -982,8 +943,8 @@ package gogduNet.sockets
 				if(packetBytes.length < 8)
 				{
 					packetBytes.position = 0;
-					dispatchEvent( new GogduNetDataEvent(GogduNetDataEvent.PROGRESS_DATA, false, false, 
-						socket, socketInSocket, DataType.BYTES, null, packetBytes) );
+					dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
+						socket.id, DataType.BYTES, null, packetBytes) );
 				}
 				//패킷 바이트의 길이가 8 이상일 경우(즉, 크기 헤더와 프로토콜 문자열 길이 헤더가 있는 경우), 반복
 				while(packetBytes.length >= 8)
@@ -1010,7 +971,7 @@ package gogduNet.sockets
 						//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
 						packetBytes.writeBytes(bytes, 8, 0);
 						
-						_record.addErrorRecord(e, "It occurred from read to data's header", true);
+						_record.addErrorRecord(true, e, "It occurred from read to data's header");
 						break;
 					}
 					
@@ -1037,7 +998,7 @@ package gogduNet.sockets
 							//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
 							packetBytes.writeBytes(bytes, protocolLength, 0);
 							
-							_record.addErrorRecord(e, "It occurred from protocol bytes convert to string and decode protocol string", true);
+							_record.addErrorRecord(true, e, "It occurred from protocol bytes convert to string and decode protocol string");
 							break;
 						}
 						
@@ -1049,11 +1010,11 @@ package gogduNet.sockets
 							data.writeBytes( packetBytes, packetBytes.position, size );
 							data.position = 0;
 							
-							_record.addRecord("Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
-								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);
+							/*_record.addRecord("Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
+								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);*/
 							
-							dispatchEvent( new GogduNetDataEvent(GogduNetDataEvent.RECEIVE_DATA, false, false, 
-								socket, socketInSocket, DataType.BYTES, protocol, data) );
+							dispatchEvent( new DataEvent(DataEvent.RECEIVE_DATA, false, false, 
+								socket.id, DataType.BYTES, protocol, data) );
 							
 							//사용한 정보를 바이트 배열에서 제거한다.
 							bytes = new ByteArray();
@@ -1062,23 +1023,23 @@ package gogduNet.sockets
 							//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
 							packetBytes.writeBytes(bytes, 8 + protocolLength + size, 0);
 						}
-						//데이터가 아직 다 전송이 안 된 경우
+							//데이터가 아직 다 전송이 안 된 경우
 						else
 						{
 							data = new ByteArray();
 							data.writeBytes( packetBytes, packetBytes.position, packetBytes.bytesAvailable );
 							data.position = 0;
 							
-							dispatchEvent( new GogduNetDataEvent(GogduNetDataEvent.PROGRESS_DATA, false, false, 
-								socket, socketInSocket, DataType.BYTES, protocol, data) );
+							dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
+								socket.id, DataType.BYTES, protocol, data) );
 						}
 					}
-					//프로토콜 정보가 다 전송되지 않은 경우
+						//프로토콜 정보가 다 전송되지 않은 경우
 					else
 					{
 						packetBytes.position = 0;
-						dispatchEvent( new GogduNetDataEvent(GogduNetDataEvent.PROGRESS_DATA, false, false, 
-							socket, socketInSocket, DataType.BYTES, null, packetBytes) );
+						dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
+							socket.id, DataType.BYTES, null, packetBytes) );
 					}
 				}
 				

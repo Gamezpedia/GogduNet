@@ -1,49 +1,67 @@
-package gogduNet.sockets
+package gogduNet.connection
 {
 	import flash.events.Event;
-	import flash.events.EventDispatcher;
-	import flash.net.Socket;
-	import flash.utils.ByteArray;
-	import flash.utils.Endian;
-	import flash.utils.getTimer;
-	import flash.utils.setTimeout;
 	import flash.events.IOErrorEvent;
 	import flash.events.SecurityErrorEvent;
 	import flash.events.TimerEvent;
+	import flash.net.Socket;
+	import flash.utils.ByteArray;
+	import flash.utils.Endian;
 	import flash.utils.Timer;
+	import flash.utils.getTimer;
+	import flash.utils.setTimeout;
 	
-	import gogduNet.events.GogduNetDataEvent;
-	import gogduNet.events.GogduNetSocketEvent;
-	import gogduNet.sockets.DataType;
-	import gogduNet.utils.RecordConsole;
+	import gogduNet.events.DataEvent;
+	import gogduNet.events.GogduNetEvent;
+	import gogduNet.utils.DataType;
 	import gogduNet.utils.Encryptor;
+	import gogduNet.utils.RecordConsole;
+	import gogduNet.utils.makePacket;
+	import gogduNet.utils.parsePacket;
 	
 	/** 연결이 성공한 경우 발생 */
-	[Event(name="connect", type="flash.events.Event")]
-	/** 서버 등에 의해 비자발적으로 연결이 끊긴 경우 발생 */
-	[Event(name="close", type="flash.events.Event")]
-	/** 연결 시도가 IOError로 실패한 경우 발생 */
-	[Event(name="ioError", type="flash.events.IOErrorEvent")]
-	/** 연결 시도가 SecurityError로 실패한 경우 발생 */
-	[Event(name="securityError", type="flash.events.SecurityErrorEvent")]
-	/** 데이터를 완전히 수신했을 때 발생. 데이터는 이벤트로 전달된다. */
-	[Event(name="receiveData", type="gogduNet.events.GogduNetDataEvent")]
+	[Event(name="connect", type="gogduNet.events.GogduNetEvent")]
+	/** 서버 등에 의해 비자발적으로 연결이 끊긴 경우 발생(close() 함수로는 발생하지 않는다.) */
+	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
+	/** 정상적인 데이터를 완전히 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
+	 * </br>(dataType:DataType.BYTES, dataDefinition, data)
+	 */
+	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
 	/** 데이터를 전송 받는 중일 때 발생. 지금까지 전송 받은 데이터가 이벤트로 전달된다.
 	 * (dataDefinition 속성이 존재하면 사용자가 보낸 (헤더와 프로토콜을 제외한)실질적인 데이터의 전송 상태를
 	 * data 속성으로 전달하며, dataDefinition 속성이 존재하지 않으면(null)
 	 * 아직 헤더나 프로토콜이 다 전송되지 않은 걸 의미하며, 헤더와 프로토콜이 포함된 바이트 배열이 전달된다)</br>
-	 * (데이터의 크기가 적어 너무 빨리 다 받은 경우엔 이 이벤트가 발생하지 않을 수도 있다.)*/
-	[Event(name="progressData", type="gogduNet.events.GogduNetDataEvent")]
-	/** 정상적이지 않은 데이터를 수신했을 때 발생 */
-	//[Event(name="invalidPacket", type="gogduNet.events.GogduNetDataEvent")]
+	 * (데이터의 크기가 적어 너무 빨리 다 받은 경우엔 이 이벤트가 발생하지 않을 수도 있다.)
+	 * </br>(dataType:DataType.BYTES, dataDefinition:null or String, data:null or ByteArray)
+	 */
+	[Event(name="progressData", type="gogduNet.events.DataEvent")]
+	/** 연결 시도가 실패한 경우 발생한다. 주의할 점으로, 서버의 인원 초과로 인해 연결이 실패한 경우엔 이 이벤트가 발생하지 않는다.
+	 * 인원 초과 검사를 잠깐이나마 연결이 되었기 때문이다. 서버 인원 초과로 인해 연결이 실패한 경우엔 GogduNetEvent.CONNECT 이벤트가 발생하고
+	 * 잠깐의 시간 뒤에 서버에 의해 Event.CLOSE 이벤트가 발생한다.
+	 * ( 단지 실패했음을 알리는 Definition 데이터를 전송 받을 뿐이다.(dataDefinition:Connect.Fail.Saturation) )</br>
+	 * 따라서 서버 인원 초과로 연결이 실패한 경우를 알아내려면 DataEvent.RECEIVE_DATA 이벤트를 이용하여
+	 * Connect.Fail.Saturation란 Definition 타입 데이터가 수신되는지를 검사해야 한다.
+	 * </br>( data:실패한 이유(IOErrorEvent.IO_ERROR or SecurityErrorEvent.SECURITY_ERROR) )
+	 */
+	[Event(name="connectFail", type="gogduNet.events.GogduNetEvent")]
 	/** 연결이 업데이트(정보를 수신)되면 발생 */
-	[Event(name="connectionUpdated", type="gogduNet.events.GogduNetSocketEvent")]
+	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
 	
-	public class GogduNetBinaryClient extends EventDispatcher
+	/** 2진 파일 전송용 TCP 클라이언트입니다. 한 번에 최대 4기가의 데이터를 전송할 수 있으며, 수신 진행 상황을
+	 * 이벤트로 알려주므로 파일 전송용으로 사용하기 좋습니다. 주의할 점으로 전송할 데이터의 크기(용량)이 큰 경우,
+	 * TCP의 특성상 하나의 연결(하나의 TCPBinaryClient 객체)에선 한 번에 하나의 데이터만 전송하는 것이 좋습니다.
+	 * (이전의 데이터가 모두 전송되기 전에 다른 데이터를 다시 전송하지 마세요)</br>
+	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
+	 * 
+	 * @langversion 3.0
+	 * @playerversion Flash Player 11
+	 * @playerversion AIR 3.0
+	 */
+	public class TCPBinaryClient extends ClientBase
 	{
+		/** 내부적으로 정보 수신이나 연결 검사 등을 위해 사용되는 타이머 */
 		private var _timer:Timer;
 		
-		// 설정
 		/** 최대 연결 지연 한계 */
 		private var _connectionDelayLimit:Number;
 		
@@ -52,11 +70,11 @@ package gogduNet.sockets
 		
 		/** 소켓 */
 		private var _socket:Socket;
-		/** 연결할 서버의 address */
+		/** 서버 address */
 		private var _serverAddress:String;
-		/** 연결할 서버의 포트 */
+		/** 서버 포트 */
 		private var _serverPort:int;
-		/** 인코딩 유형(기본값="UTF-8") */
+		/** 서버 인코딩 유형(기본값="UTF-8") */
 		private var _encoding:String;
 		
 		// 상태
@@ -67,9 +85,11 @@ package gogduNet.sockets
 		/** 디버그용 기록 */
 		private var _record:RecordConsole;
 		
+		/** 수신되었으나 아직 처리되지 않은 데이터들을 임시로 저장해 두는 바이트 배열 */
 		private var _backupBytes:ByteArray;
 		
-		private var _event:GogduNetSocketEvent;
+		/** GogduNetEvent.CONNECTION_UPDATE 이벤트 객체 */
+		private var _event:GogduNetEvent;
 		
 		/** <p>serverAddress : 연결할 서버의 address</p>
 		 * <p>serverPort : 연결할 서버의 포트</p>
@@ -77,7 +97,7 @@ package gogduNet.sockets
 		 * <p>connectionDelayLimit : 연결 지연 한계(ms)(여기서 설정한 시간 동안 서버로부터 데이터가 오지 않으면 서버와 연결이 끊긴 것으로 간주한다.)</p>
 		 * <p>encoding : 프로토콜 문자열의 변환에 사용할 인코딩 형식</p>
 		 */
-		public function GogduNetBinaryClient(serverAddress:String, serverPort:int, timerInterval:Number=100,
+		public function TCPBinaryClient(serverAddress:String, serverPort:int, timerInterval:Number=100,
 										connectionDelayLimit:Number=10000, encoding:String="UTF-8")
 		{
 			_timer = new Timer(timerInterval);
@@ -91,33 +111,32 @@ package gogduNet.sockets
 			_connectedTime = -1;
 			_record = new RecordConsole();
 			_backupBytes = new ByteArray();
-			_event = new GogduNetSocketEvent(GogduNetSocketEvent.CONNECTION_UPDATED, false, false, null, _socket, null);
+			_event = new GogduNetEvent(GogduNetEvent.CONNECTION_UPDATE, false, false, null);
 		}
 		
-		/** 실행용 타이머의 재생 간격을 가져온다. */
+		/** 내부적으로 정보 수신이나 연결 검사 등을 위해 사용되는 타이머의 재생 간격을 가져오거나 설정한다.(ms) */
 		public function get timerInterval():Number
 		{
 			return _timer.delay;
 		}
-		/** 실행용 타이머의 재생 간격을 설정한다. */
 		public function set timerInterval(value:Number):void
 		{
 			_timer.delay = value;
 		}
 		
-		/** 연결 지연 한계를 가져온다. */
+		/** 연결 지연 한계 시간을 가져오거나 설정한다.(ms)
+		 * 이 시간을 넘도록 정보가 수신되지 않은 경우엔 연결이 끊긴 것으로 간주하고 이쪽에서도 연결을 끊는다.
+		 */
 		public function get connectionDelayLimit():Number
 		{
 			return _connectionDelayLimit;
 		}
-		/** 연결 지연 한계를 설정한다. */
 		public function set connectionDelayLimit(value:Number):void
 		{
 			_connectionDelayLimit = value;
 		}
 		
-		// setter, getter
-		/** 소켓을 가져온다. */
+		/** 플래시의 네이티브 소켓을 가져온다. */
 		public function get socket():Socket
 		{
 			return _socket;
@@ -153,7 +172,7 @@ package gogduNet.sockets
 			_serverPort = value;
 		}
 		
-		/** 통신 인코딩 유형을 가져오거나 설정한다. 설정은 연결하고 있지 않을 때에만 할 수 있다. */
+		/** 프로토콜 바이트의 문자열 변환에 사용할 인코딩 유형을 가져오거나 설정한다. 설정은 연결하고 있지 않을 때에만 할 수 있다. */
 		public function get encoding():String
 		{
 			return _encoding;
@@ -174,13 +193,13 @@ package gogduNet.sockets
 			return _isConnected;
 		}
 		
-		/** 디버그용 기록을 가져온다. */
+		/** 디버그용 기록을 가지고 있는 RecordConsole 객체를 가져온다. */
 		public function get record():RecordConsole
 		{
 			return _record;
 		}
 		
-		/** 연결된 후 시간이 얼마나 지났는지를 나타내는 Number 값을 가져온다. */
+		/** 연결된 후 시간이 얼마나 지났는지를 나타내는 Number 값을 가져온다.(ms) */
 		public function get elapsedTimeAfterConnected():Number
 		{
 			if(_isConnected == false)
@@ -191,7 +210,7 @@ package gogduNet.sockets
 			return getTimer() - _connectedTime;
 		}
 		
-		/** 마지막으로 연결된 시각으로부터 지난 시간을 가져온다. */
+		/** 마지막으로 연결된 시각으로부터 지난 시간을 가져온다.(ms) */
 		public function get elapsedTimeAfterLastReceived():Number
 		{
 			return getTimer() - _lastReceivedTime;
@@ -206,7 +225,6 @@ package gogduNet.sockets
 			dispatchEvent(_event);
 		}
 		
-		// public function
 		public function dispose():void
 		{
 			_socket.close();
@@ -214,10 +232,11 @@ package gogduNet.sockets
 			_socket.removeEventListener(IOErrorEvent.IO_ERROR, _socketConnectFail);
 			_socket.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, _socketConnectFail2);
 			_socket.removeEventListener(Event.CLOSE, _socketClosed);
-			//removeEventListener(Event.ENTER_FRAME, _timerFunc);
+			
 			_timer.stop();
 			_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
 			_timer = null;
+			
 			_socket = null;
 			_serverAddress = null;
 			_encoding = null;
@@ -229,7 +248,7 @@ package gogduNet.sockets
 			_isConnected = false;
 		}
 		
-		/** 서버와 연결 */
+		/** 서버와 연결을 시도한다. */
 		public function connect():void
 		{
 			if(!_serverAddress || _isConnected == true)
@@ -251,38 +270,42 @@ package gogduNet.sockets
 			
 			_connectedTime = getTimer();
 			updateLastReceivedTime();
-			_record.addRecord("Connected to server(connectedTime:" + _connectedTime + ")", true);
+			_record.addRecord(true, "Connected to server(connectedTime:" + _connectedTime + ")");
 			
 			_socket.addEventListener(Event.CLOSE, _socketClosed);
-			//addEventListener(Event.ENTER_FRAME, _timerFunc);
+			
 			_timer.start();
 			_timer.addEventListener(TimerEvent.TIMER, _timerFunc);
 			
 			_isConnected = true;
-			dispatchEvent(new Event(Event.CONNECT));
+			dispatchEvent(new GogduNetEvent(GogduNetEvent.CONNECT));
 		}
 		
+		/** IOErrorEvent.IO_ERROR로 연결이 실패 */
 		private function _socketConnectFail(e:IOErrorEvent):void
 		{
-			_record.addRecord("Failed connect to server(IOErrorEvent)", true);
 			_socket.removeEventListener(Event.CONNECT, _socketConnect);
 			_socket.removeEventListener(IOErrorEvent.IO_ERROR, _socketConnectFail);
 			_socket.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, _socketConnectFail2);
 			
-			dispatchEvent(e);
+			_record.addRecord(true, "Failed connect to server(IOErrorEvent)");
+			
+			dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT_FAIL, false, false, e.type) );
 		}
 		
+		/** SecurityErrorEvent.SECURITY_ERROR로 연결이 실패 */
 		private function _socketConnectFail2(e:SecurityErrorEvent):void
 		{
-			_record.addRecord("Failed connect to server(SecurityErrorEvent)", true);
 			_socket.removeEventListener(Event.CONNECT, _socketConnect);
 			_socket.removeEventListener(IOErrorEvent.IO_ERROR, _socketConnectFail);
 			_socket.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, _socketConnectFail2);
 			
-			dispatchEvent(e);
+			_record.addRecord(true, "Failed connect to server(SecurityErrorEvent)");
+			
+			dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT_FAIL, false, false, e.type) );
 		}
 		
-		/** 서버와의 연결을 끊음 */
+		/** 서버와의 연결을 끊는다. */
 		public function close():void
 		{
 			if(_isConnected == false)
@@ -295,28 +318,25 @@ package gogduNet.sockets
 			_socket.removeEventListener(IOErrorEvent.IO_ERROR, _socketConnectFail);
 			_socket.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, _socketConnectFail2);
 			_socket.removeEventListener(Event.CLOSE, _socketClosed);
-			//removeEventListener(Event.ENTER_FRAME, _timerFunc);
 			
 			_timer.stop();
 			_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
 			
-			_record.addRecord("Connection to close(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")", true);
+			_record.addRecord(true, "Connection to close(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")");
 			_isConnected = false;
 		}
 		
 		/** 2진 데이터를 전송한다. 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
 		 * 신경 쓸 필요는 없다. 그리고 definition(프로토콜 문자열)은 암호화되어 전송되고, 받았을 때 복호화되어 이벤트로 넘겨진다. 이
-		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)<br/>
+		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)
+		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<br/>
 		 * ( 한 번에 전송할 수 있는 data의 최대 길이는 uint로 표현할 수 있는 최대값인 4294967295(=4GB)이며,
 		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )</br>
-		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.
+		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.)
 		 */
 		public function sendBytes(definition:String, data:ByteArray=null):Boolean
 		{
-			if(_isConnected == false)
-			{
-				return false;
-			}
+			if(_isConnected == false){return false;}
 			
 			//패킷 생성
 			var packet:ByteArray = new ByteArray();
@@ -350,14 +370,14 @@ package gogduNet.sockets
 		
 		private function _socketClosed(e:Event):void
 		{
-			_record.addRecord("Connection to server is disconnected(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")", true);
+			_record.addRecord(true, "Connection to server is disconnected(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")");
 			_isConnected = false;
 			
 			_socket.removeEventListener(Event.CONNECT, _socketConnect);
 			_socket.removeEventListener(IOErrorEvent.IO_ERROR, _socketConnectFail);
 			_socket.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, _socketConnectFail2);
 			_socket.removeEventListener(Event.CLOSE, _socketClosed);
-			//removeEventListener(Event.ENTER_FRAME, _timerFunc);
+			
 			_timer.stop();
 			_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
 			
@@ -377,7 +397,7 @@ package gogduNet.sockets
 			// 일정 시간 이상 전송이 오지 않을 경우 접속이 끊긴 것으로 간주하여 이쪽에서도 접속을 끊는다.
 			if(elapsedTimeAfterLastReceived > _connectionDelayLimit)
 			{
-				_record.addRecord("Connection to close(NoResponding)(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")", true);
+				_record.addRecord(true, "Connection to close(NoResponding)(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")");
 				close();
 				dispatchEvent(new Event(Event.CLOSE));
 			}
@@ -411,6 +431,7 @@ package gogduNet.sockets
 			bytes.position = 0;
 			packetBytes.position = 0;
 			packetBytes.writeBytes(bytes, 0, bytes.length);
+			
 			//만약 AS가 아닌 C# 등과 통신할 경우 엔디안이 다르므로 오류가 날 수 있다. 그걸 방지하기 위함.
 			_socket.endian = Endian.LITTLE_ENDIAN;
 			_socket.readBytes(packetBytes, packetBytes.length, _socket.bytesAvailable);
@@ -420,8 +441,8 @@ package gogduNet.sockets
 			if(packetBytes.length < 8)
 			{
 				packetBytes.position = 0;
-				dispatchEvent( new GogduNetDataEvent(GogduNetDataEvent.PROGRESS_DATA, false, false, 
-					null, _socket, DataType.BYTES, null, packetBytes) );
+				dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
+					null, DataType.BYTES, null, packetBytes) );
 			}
 			//패킷 바이트의 길이가 8 이상일 경우(즉, 크기 헤더와 프로토콜 문자열 길이 헤더가 있는 경우), 반복
 			while(packetBytes.length >= 8)
@@ -448,7 +469,7 @@ package gogduNet.sockets
 					//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
 					packetBytes.writeBytes(bytes, 8, 0);
 					
-					_record.addErrorRecord(e, "It occurred from read to data's header", true);
+					_record.addErrorRecord(true, e, "It occurred from read to data's header");
 					break;
 				}
 				
@@ -475,7 +496,7 @@ package gogduNet.sockets
 						//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
 						packetBytes.writeBytes(bytes, protocolLength, 0);
 						
-						_record.addErrorRecord(e, "It occurred from protocol bytes convert to string and decode protocol string", true);
+						_record.addErrorRecord(true, e, "It occurred from protocol bytes convert to string and decode protocol string");
 						break;
 					}
 					
@@ -487,10 +508,10 @@ package gogduNet.sockets
 						data.writeBytes( packetBytes, packetBytes.position, size );
 						data.position = 0;
 						
-						_record.addRecord("Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")", true);
+						/*_record.addRecord(true, "Data received(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")");*/
 						
-						dispatchEvent( new GogduNetDataEvent(GogduNetDataEvent.RECEIVE_DATA, false, false, 
-							null, _socket, DataType.BYTES, protocol, data) );
+						dispatchEvent( new DataEvent(DataEvent.RECEIVE_DATA, false, false, 
+							null, DataType.BYTES, protocol, data) );
 						
 						//사용한 정보를 바이트 배열에서 제거한다.
 						bytes = new ByteArray();
@@ -499,23 +520,23 @@ package gogduNet.sockets
 						//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
 						packetBytes.writeBytes(bytes, 8 + protocolLength + size, 0);
 					}
-					//데이터가 아직 다 전송이 안 된 경우
+						//데이터가 아직 다 전송이 안 된 경우
 					else
 					{
 						data = new ByteArray();
 						data.writeBytes( packetBytes, packetBytes.position, packetBytes.bytesAvailable );
 						data.position = 0;
 						
-						dispatchEvent( new GogduNetDataEvent(GogduNetDataEvent.PROGRESS_DATA, false, false, 
-							null, _socket, DataType.BYTES, protocol, data) );
+						dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
+							null, DataType.BYTES, protocol, data) );
 					}
 				}
-				//프로토콜 정보가 다 전송되지 않은 경우
+					//프로토콜 정보가 다 전송되지 않은 경우
 				else
 				{
 					packetBytes.position = 0;
-					dispatchEvent( new GogduNetDataEvent(GogduNetDataEvent.PROGRESS_DATA, false, false, 
-						null, _socket, DataType.BYTES, null, packetBytes) );
+					dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
+						null, DataType.BYTES, null, packetBytes) );
 				}
 			}
 			

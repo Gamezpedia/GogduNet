@@ -6,6 +6,7 @@
 	//import com.hurlant.crypto.symmetric.XTeaKey;
 	//import com.hurlant.util.Hex;
 	
+	/** 이 클래스를 수정하여 패킷의 암호화 방법을 바꿀 수 있습니다. 단, 암호화의 최종 결과물은 Base64로 인코딩된 것이어야 합니다. */
 	public class Encryptor
 	{
 		//public static var cipher:XTeaKey = new XTeaKey(Hex.toArray("809849497DF33CE3809849497DF33CE3809849497DF33CE3809849497DF33CE3809849497DF33CE3"));

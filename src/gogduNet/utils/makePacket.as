@@ -2,8 +2,7 @@
 {
 	import gogduNet.utils.Encryptor;
 	
-	/** 인자로 주어진 type과 definition, datas로 패킷 문자열을 만들어 반환한다. 단, 실패한 경우엔 null을 반환.
-	 */
+	/** 인자로 주어진 type과 definition, datas로 패킷 문자열을 만들어 반환한다. 단, 실패한 경우엔 null을 반환한다. */
 	public function makePacket(type:String, definition:String, data:Object=null):String
 	{
 		try

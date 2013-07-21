@@ -1,74 +1,74 @@
 ﻿package gogduNet.utils
 {
-	/** data 인수로부터 type에 맞는 데이터를 추출한다. **/
+	/** data 인수로부터 type에 맞는 데이터를 추출한다. 실패한 경우엔 null을 반환한다. */
 	public function parseData(type:String, data:Object):Object
 	{
 		// type 문자열을 참고하여 알맞은 유형으로 byte를 변환한다.
 		switch(type)
 		{
 			// define
-			case "def":
+			case DataType.DEFINITION:
 			{
 				return null;
 			}
 			// string
-			case "str":
+			case DataType.STRING:
 			{
-				if(!data is String)
+				if( !(data is String) )
 				{
 					return null;
 				}
 				return data;
 			}
 			// array
-			case "arr":
+			case DataType.ARRAY:
 			{
-				if(!data is Array)
+				if( !(data is Array) )
 				{
 					return null;
 				}
 				return data;
 			}
 			// integer
-			case "int":
+			case DataType.INTEGER:
 			{
-				if(!data is int && !data is uint && !data is Number)
+				if( !(data is int) && !(data is uint) && !(data is Number) )
 				{
 					return null;
 				}
 				return int(data);
 			}
 			// unsigned integer
-			case "uint":
+			case DataType.UNSIGNED_INTEGER:
 			{
-				if(!data is int && !data is uint && !data is Number)
+				if( !(data is int) && !(data is uint) && !(data is Number) )
 				{
 					return null;
 				}
 				return uint(data);
 			}
 			// rationals(rational number)
-			case "rati":
+			case DataType.RATIONALS:
 			{
-				if(!data is int && !data is uint && !data is Number)
+				if( !(data is int) && !(data is uint) && !(data is Number) )
 				{
 					return null;
 				}
 				return Number(data);
 			}
 			// boolean(true or false)
-			case "tf":
+			case DataType.BOOLEAN:
 			{
-				if(!data is Boolean)
+				if( !(data is Boolean) )
 				{
 					return null;
 				}
 				return data;
 			}
 			// JSON
-			case "json":
+			case DataType.JSON:
 			{
-				if(!data is Object)
+				if( !(data is Object) )
 				{
 					return null;
 				}
@@ -83,47 +83,3 @@
 		return null;
 	}
 }
-			/*// object
-			case "obj":
-			{
-				try
-				{
-					bytes = new ByteArray();
-					bytes.position = 0;
-					bytes.writeUTFBytes(data); //Flash Object Encoding is Only UTF-8
-					bytes.position = 0;
-					data = bytes.readObject();
-					
-					return data;
-				}
-				catch(e:Error)
-				{
-					return null;
-				}
-			}
-			// point
-			case "pt":
-			{
-				return data;
-			}
-			// bytes(ByteArray)
-			case "bts":
-			{
-				try
-				{
-					bytes = new ByteArray();
-					bytes.length = 0;
-					bytes.position = 0;
-					bytes.writeMultiByte(data, encoding);
-					bytes.position = 0;
-					bytes.readBytes(bytes, 0, bytes.length);
-					data = bytes;
-					
-					return data;
-				}
-				catch(e:Error)
-				{
-					return null;
-				}
-			}*/
-			// byte
