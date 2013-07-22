@@ -47,7 +47,7 @@ package gogduNet.connection
 			_port = value;
 		}
 		
-		/** 통신을 할 때 아직 처리하지 못 한 패킷을 보관하는 바이트 배열이다.
+		/** 통신을 할 때 아직 처리하지 못 한 패킷을 보관하는 바이트 배열이다.<p/>
 		 * 배열이 수정되면 오류가 날 수 있으므로 건드리지 않는 것이 좋다.
 		 */
 		internal function get _backupBytes():ByteArray

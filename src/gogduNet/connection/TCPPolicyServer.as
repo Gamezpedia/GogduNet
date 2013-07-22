@@ -14,18 +14,21 @@ package gogduNet.connection
 	
 	/** 허용되지 않은 대상에게서 정보가 전송되면 발생 */
 	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
-	/** 운영체제 등에 의해 비자발적으로 연결이 끊긴 경우 발생(close() 함수로는 발생하지 않는다.) */
+	/** 운영체제 등에 의해 비자발적으로 연결이 끊긴 경우 발생<p/>
+	 * (close() 함수로는 발생하지 않는다.)
+	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
-	/** 특정 소켓이 접속한 경우 발생
-	 * </br>( data:{address:소켓의 address, port:소켓의 포트} )
+	/** 어떤 소켓이 접속한 경우 발생
+	 * <p/>( data:{address:소켓의 address, port:소켓의 포트} )
 	 */
 	[Event(name="socketConnect", type="gogduNet.events.GogduNetEvent")]
-	/** 특정 소켓과의 연결이 끊긴 경우 발생
-	 * </br>( data:{address:소켓의 address, port:소켓의 포트} )
+	/** 어떤 소켓과의 연결이 끊긴 경우 발생
+	 * <p/>( data:{address:소켓의 address, port:소켓의 포트} )
 	 */
 	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
 	
-	/** 정책 파일 전송용 TCP 서버입니다. 이 서버에 연결한 소켓에게 정책 파일 문자열을 전송하며,
+	/** 정책 파일 전송용 TCP 서버입니다.<p/>
+	 * 이 서버에 연결한 소켓에게 정책 파일 문자열을 전송하며,
 	 * 일정 시간 뒤에 자동으로 연결을 끊습니다.
 	 * 
 	 * @langversion 3.0

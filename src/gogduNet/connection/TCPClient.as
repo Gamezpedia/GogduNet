@@ -19,31 +19,32 @@ package gogduNet.connection
 	import gogduNet.utils.makePacket;
 	import gogduNet.utils.parsePacket;
 	
-	/** 연결이 성공한 경우 발생 */
+	/** 연결이 성공한 경우 발생합니다. */
 	[Event(name="connect", type="gogduNet.events.GogduNetEvent")]
-	/** 서버 등에 의해 비자발적으로 연결이 끊긴 경우 발생(close() 함수로는 발생하지 않는다.) */
+	/** 서버 등에 의해 비자발적으로 연결이 끊긴 경우 발생<p/>
+	 * (close() 함수로는 발생하지 않는다.)
+	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
 	/** 정상적인 데이터를 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
-	 * </br>(dataType, dataDefinition, data)
+	 * <p/>(dataType, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
 	/** 정상적이지 않은 데이터를 수신했을 때 발생
-	 * </br>(dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷의 ByteArray)
+	 * <p/>(dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷의 ByteArray)
 	 */
 	[Event(name="invalidPacket", type="gogduNet.events.DataEvent")]
-	/** 연결 시도가 실패한 경우 발생한다. 주의할 점으로, 서버의 인원 초과로 인해 연결이 실패한 경우엔 이 이벤트가 발생하지 않는다.
-	 * 인원 초과 검사를 잠깐이나마 연결이 되었기 때문이다. 서버 인원 초과로 인해 연결이 실패한 경우엔 GogduNetEvent.CONNECT 이벤트가 발생하고
-	 * 잠깐의 시간 뒤에 서버에 의해 GogduNetEvent.CLOSE 이벤트가 발생한다.
-	 * ( 단지 실패했음을 알리는 Definition 데이터를 전송 받을 뿐이다.(dataDefinition:Connect.Fail.Saturation) )</br>
-	 * 따라서 서버 인원 초과로 연결이 실패한 경우를 알아내려면 DataEvent.RECEIVE_DATA 이벤트를 이용하여
-	 * Connect.Fail.Saturation란 Definition 타입 데이터가 수신되는지를 검사해야 한다.
-	 * </br>( data:실패한 이유(IOErrorEvent.IO_ERROR or SecurityErrorEvent.SECURITY_ERROR) )
+	/** 연결 시도가 실패한 경우 발생한다.<p/>
+	 * IOErrorEvent.IO_ERROR : IO_ERROR로 연결 실패<p/>
+	 * SecurityErrorEvent.SECURITY_ERROR : SECURITY_ERROR로 연결 실패<p/>
+	 * "Timeout" : 연결 시간 초과<p/>
+	 * "Saturation" : 서버측 최대 인원 초과
+	 * <p/>( data:<p/>실패한 이유(IOErrorEvent.IO_ERROR or SecurityErrorEvent.SECURITY_ERROR or "Timeout" or "Saturation") )
 	 */
 	[Event(name="connectFail", type="gogduNet.events.GogduNetEvent")]
 	/** 연결이 업데이트(정보를 수신)되면 발생 */
 	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
 	
-	/** JSON 문자열을 기반으로 하여 통신하는 TCP 클라이언트
+	/** JSON 문자열을 기반으로 하여 통신하는 TCP 클라이언트<p/>
 	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
 	 * 
 	 * @langversion 3.0
@@ -86,7 +87,8 @@ package gogduNet.connection
 		/** <p>serverAddress : 연결할 서버의 address</p>
 		 * <p>serverPort : 연결할 서버의 포트</p>
 		 * <p>timerInterval : 정보 수신과 연결 검사를 할 때 사용할 타이머의 반복 간격(ms)</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)(여기서 설정한 시간 동안 서버로부터 데이터가 오지 않으면 서버와 연결이 끊긴 것으로 간주한다.)</p>
+		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
+		 * (여기서 설정한 시간 동안 서버로부터 데이터가 오지 않으면 서버와 연결이 끊긴 것으로 간주한다.)</p>
 		 * <p>encoding : 통신을 할 때 사용할 인코딩 형식</p>
 		 */
 		public function TCPClient(serverAddress:String, serverPort:int, timerInterval:Number=100,
@@ -262,15 +264,65 @@ package gogduNet.connection
 			
 			_connectedTime = getTimer();
 			updateLastReceivedTime();
-			_record.addRecord(true, "Connected to server(connectedTime:" + _connectedTime + ")");
 			
-			_socket.addEventListener(Event.CLOSE, _socketClosed);
+			_record.addRecord(true, "(Before validate)Connected to server(connectedTime:" + _connectedTime + ")");
 			
 			_timer.start();
 			_timer.addEventListener(TimerEvent.TIMER, _timerFunc);
 			
-			_isConnected = true;
-			dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT) );
+			this.addEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+			
+			setTimeout(_failReceiveConnectPacket, 5000);
+		}
+		
+		private function _receiveConnectPacket(e:DataEvent):void
+		{
+			if(e.dataType == DataType.DEFINITION)
+			{
+				if(e.dataDefinition == "Connect.Success")
+				{
+					this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+					
+					_record.addRecord(true, "(After validate)Connected to server(connectedTime:" + _connectedTime + ")");
+					
+					_socket.addEventListener(Event.CLOSE, _socketClosed);
+					_isConnected = true;
+					
+					dispatchEvent(new GogduNetEvent(GogduNetEvent.CONNECT));
+				}
+				else if(e.dataDefinition == "Connect.Fail.Saturation")
+				{
+					this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+					
+					_timer.stop();
+					_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
+					this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+					
+					_record.addRecord(true, "Failed connect to server(Saturation)");
+					
+					dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT_FAIL, false, false, "Saturation") );
+				}
+			}
+		}
+		
+		private function _failReceiveConnectPacket():void
+		{
+			try
+			{
+				if(_isConnected == false)
+				{
+					_timer.stop();
+					_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
+					this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+					
+					_record.addRecord(true, "Failed connect to server(Timeout)");
+					
+					dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT_FAIL, false, false, "Timeout") );
+				}
+			}
+			catch(e:Error)
+			{
+			}
 		}
 		
 		/** IOErrorEvent.IO_ERROR로 연결이 실패 */

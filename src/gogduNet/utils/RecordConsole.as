@@ -4,6 +4,9 @@
 	import flash.utils.ByteArray;
 	import flash.utils.getTimer;
 	
+	/** 디버그용 문자열 기록을 관리하는 클래스입니다.
+	 * Flash Player에서 사용하려면, saveRecord() 함수 부분을 수정하거나 주석 처리하세요.
+	 */
 	public class RecordConsole
 	{
 		public static const MAX_LENGTH:int = 10000000000;
@@ -12,9 +15,6 @@
 		private var _garbageRecords:Vector.<String>;
 		private var _byteRecords:Vector.<ByteArray>;
 		
-		/** 디버그용 문자열 기록을 관리하는 클래스입니다.
-		 * Flash Player에서 사용하려면, saveRecord() 함수 부분을 수정하거나 주석 처리하세요.
-		 */
 		public function RecordConsole()
 		{
 			_record = '';

@@ -19,38 +19,40 @@ package gogduNet.connection
 	import gogduNet.utils.makePacket;
 	import gogduNet.utils.parsePacket;
 	
-	/** 연결이 성공한 경우 발생 */
+	/** 연결이 성공한 경우 발생합니다. */
 	[Event(name="connect", type="gogduNet.events.GogduNetEvent")]
-	/** 서버 등에 의해 비자발적으로 연결이 끊긴 경우 발생(close() 함수로는 발생하지 않는다.) */
+	/** 서버 등에 의해 비자발적으로 연결이 끊긴 경우 발생<p/>
+	 * (close() 함수로는 발생하지 않는다.) */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
 	/** 정상적인 데이터를 완전히 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
-	 * </br>(dataType:DataType.BYTES, dataDefinition, data)
+	 * <p/>(dataType:DataType.BYTES, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
-	/** 데이터를 전송 받는 중일 때 발생. 지금까지 전송 받은 데이터가 이벤트로 전달된다.
+	/** 데이터를 전송 받는 중일 때 발생. 지금까지 전송 받은 데이터가 이벤트로 전달된다.<p/>
 	 * (dataDefinition 속성이 존재하면 사용자가 보낸 (헤더와 프로토콜을 제외한)실질적인 데이터의 전송 상태를
 	 * data 속성으로 전달하며, dataDefinition 속성이 존재하지 않으면(null)
-	 * 아직 헤더나 프로토콜이 다 전송되지 않은 걸 의미하며, 헤더와 프로토콜이 포함된 바이트 배열이 전달된다)</br>
+	 * 아직 헤더나 프로토콜이 다 전송되지 않은 걸 의미하며, 헤더와 프로토콜이 포함된 바이트 배열이 전달된다)<p/>
 	 * (데이터의 크기가 적어 너무 빨리 다 받은 경우엔 이 이벤트가 발생하지 않을 수도 있다.)
-	 * </br>(dataType:DataType.BYTES, dataDefinition:null or String, data:null or ByteArray)
+	 * <p/>(dataType:DataType.BYTES, dataDefinition:null or String, data:null or ByteArray)
 	 */
 	[Event(name="progressData", type="gogduNet.events.DataEvent")]
-	/** 연결 시도가 실패한 경우 발생한다. 주의할 점으로, 서버의 인원 초과로 인해 연결이 실패한 경우엔 이 이벤트가 발생하지 않는다.
-	 * 인원 초과 검사를 잠깐이나마 연결이 되었기 때문이다. 서버 인원 초과로 인해 연결이 실패한 경우엔 GogduNetEvent.CONNECT 이벤트가 발생하고
-	 * 잠깐의 시간 뒤에 서버에 의해 Event.CLOSE 이벤트가 발생한다.
-	 * ( 단지 실패했음을 알리는 Definition 데이터를 전송 받을 뿐이다.(dataDefinition:Connect.Fail.Saturation) )</br>
-	 * 따라서 서버 인원 초과로 연결이 실패한 경우를 알아내려면 DataEvent.RECEIVE_DATA 이벤트를 이용하여
-	 * Connect.Fail.Saturation란 Definition 타입 데이터가 수신되는지를 검사해야 한다.
-	 * </br>( data:실패한 이유(IOErrorEvent.IO_ERROR or SecurityErrorEvent.SECURITY_ERROR) )
+	/** 연결 시도가 실패한 경우 발생한다.<p/>
+	 * IOErrorEvent.IO_ERROR : IO_ERROR로 연결 실패<p/>
+	 * SecurityErrorEvent.SECURITY_ERROR : SECURITY_ERROR로 연결 실패<p/>
+	 * "Timeout" : 연결 시간 초과<p/>
+	 * "Saturation" : 서버측 최대 인원 초과
+	 * <p/>( data:<p/>실패한 이유(IOErrorEvent.IO_ERROR or SecurityErrorEvent.SECURITY_ERROR or "Timeout" or "Saturation") )
 	 */
 	[Event(name="connectFail", type="gogduNet.events.GogduNetEvent")]
 	/** 연결이 업데이트(정보를 수신)되면 발생 */
 	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
 	
-	/** 2진 파일 전송용 TCP 클라이언트입니다. 한 번에 최대 4기가의 데이터를 전송할 수 있으며, 수신 진행 상황을
-	 * 이벤트로 알려주므로 파일 전송용으로 사용하기 좋습니다. 주의할 점으로 전송할 데이터의 크기(용량)이 큰 경우,
-	 * TCP의 특성상 하나의 연결(하나의 TCPBinaryClient 객체)에선 한 번에 하나의 데이터만 전송하는 것이 좋습니다.
-	 * (이전의 데이터가 모두 전송되기 전에 다른 데이터를 다시 전송하지 마세요)</br>
+	/** 2진 파일 전송용 TCP 클라이언트입니다.<p/>
+	 * 한 번에 최대 4기가의 데이터를 전송할 수 있으며, 수신 진행 상황을
+	 * 이벤트로 알려주므로 파일 전송용으로 사용하기 좋습니다.<p/>
+	 * 주의할 점으로 전송할 데이터의 크기(용량)이 큰 경우, TCP의 특성상 하나의 연결(하나의 TCPBinaryClient 객체)에선
+	 * 한 번에 하나의 데이터만 전송하는 것이 좋습니다.<p/>
+	 * (이전의 데이터가 모두 전송되기 전에 다른 데이터를 다시 전송하지 마세요)<p/>
 	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
 	 * 
 	 * @langversion 3.0
@@ -94,7 +96,8 @@ package gogduNet.connection
 		/** <p>serverAddress : 연결할 서버의 address</p>
 		 * <p>serverPort : 연결할 서버의 포트</p>
 		 * <p>timerInterval : 정보 수신과 연결 검사를 할 때 사용할 타이머의 반복 간격(ms)</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)(여기서 설정한 시간 동안 서버로부터 데이터가 오지 않으면 서버와 연결이 끊긴 것으로 간주한다.)</p>
+		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
+		 * (여기서 설정한 시간 동안 서버로부터 데이터가 오지 않으면 서버와 연결이 끊긴 것으로 간주한다.)</p>
 		 * <p>encoding : 프로토콜 문자열의 변환에 사용할 인코딩 형식</p>
 		 */
 		public function TCPBinaryClient(serverAddress:String, serverPort:int, timerInterval:Number=100,
@@ -270,15 +273,62 @@ package gogduNet.connection
 			
 			_connectedTime = getTimer();
 			updateLastReceivedTime();
-			_record.addRecord(true, "Connected to server(connectedTime:" + _connectedTime + ")");
 			
-			_socket.addEventListener(Event.CLOSE, _socketClosed);
+			_record.addRecord(true, "(Before validate)Connected to server(connectedTime:" + _connectedTime + ")");
 			
 			_timer.start();
 			_timer.addEventListener(TimerEvent.TIMER, _timerFunc);
 			
-			_isConnected = true;
-			dispatchEvent(new GogduNetEvent(GogduNetEvent.CONNECT));
+			this.addEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+			
+			setTimeout(_failReceiveConnectPacket, 5000);
+		}
+		
+		private function _receiveConnectPacket(e:DataEvent):void
+		{
+			if(e.dataDefinition == "Connect.Success")
+			{
+				this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+				
+				_record.addRecord(true, "(After validate)Connected to server(connectedTime:" + _connectedTime + ")");
+				
+				_socket.addEventListener(Event.CLOSE, _socketClosed);
+				_isConnected = true;
+				
+				dispatchEvent(new GogduNetEvent(GogduNetEvent.CONNECT));
+			}
+			else if(e.dataDefinition == "Connect.Fail.Saturation")
+			{
+				this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+				
+				_timer.stop();
+				_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
+				this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+				
+				_record.addRecord(true, "Failed connect to server(Saturation)");
+				
+				dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT_FAIL, false, false, "Saturation") );
+			}
+		}
+		
+		private function _failReceiveConnectPacket():void
+		{
+			try
+			{
+				if(_isConnected == false)
+				{
+					_timer.stop();
+					_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
+					this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+					
+					_record.addRecord(true, "Failed connect to server(Timeout)");
+					
+					dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT_FAIL, false, false, "Timeout") );
+				}
+			}
+			catch(e:Error)
+			{
+			}
 		}
 		
 		/** IOErrorEvent.IO_ERROR로 연결이 실패 */
@@ -329,9 +379,9 @@ package gogduNet.connection
 		/** 2진 데이터를 전송한다. 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
 		 * 신경 쓸 필요는 없다. 그리고 definition(프로토콜 문자열)은 암호화되어 전송되고, 받았을 때 복호화되어 이벤트로 넘겨진다. 이
 		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)
-		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<br/>
+		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<p/>
 		 * ( 한 번에 전송할 수 있는 data의 최대 길이는 uint로 표현할 수 있는 최대값인 4294967295(=4GB)이며,
-		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )</br>
+		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )<p/>
 		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.)
 		 */
 		public function sendBytes(definition:String, data:ByteArray=null):Boolean
@@ -381,7 +431,7 @@ package gogduNet.connection
 			_timer.stop();
 			_timer.removeEventListener(TimerEvent.TIMER, _timerFunc);
 			
-			dispatchEvent(new Event(Event.CLOSE));
+			dispatchEvent(new GogduNetEvent(GogduNetEvent.CLOSE));
 		}
 		
 		/** 타이머로 반복되는 함수 */
@@ -399,7 +449,7 @@ package gogduNet.connection
 			{
 				_record.addRecord(true, "Connection to close(NoResponding)(elapsedTimeAfterConnected:" + elapsedTimeAfterConnected + ")");
 				close();
-				dispatchEvent(new Event(Event.CLOSE));
+				dispatchEvent(new GogduNetEvent(GogduNetEvent.CLOSE));
 			}
 		}
 		

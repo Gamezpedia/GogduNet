@@ -23,40 +23,39 @@ package gogduNet.connection
 	import gogduNet.utils.parsePacket;
 	import gogduNet.utils.DataType;
 	
-	/** 허용되지 않은 대상에게서 정보가 전송되면 발생
-	 * </br>( data:{address:대상의 address, port:대상의 포트} )
+	/** 허용되지 않은 대상에게서 정보가 전송되면 발생<p/>
+	 * <p/>( data:{address:대상의 address, port:대상의 포트} )
 	 */
 	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
-	/** 운영체제 등에 의해 비자발적으로 서버가 닫힌 경우 발생(close() 함수로는 발생하지 않는다.) */
+	/** 운영체제 등에 의해 비자발적으로 서버가 닫힌 경우 발생<p/>
+	 * (close() 함수로는 발생하지 않는다.)
+	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
-	/** 특정 소켓이 성공적으로 접속한 경우 발생
-	 * </br>(data:소켓의 id)
+	/** 어떤 소켓이 성공적으로 접속한 경우 발생
+	 * <p/>(data:소켓의 id)
 	 */
 	[Event(name="socketConnect", type="gogduNet.events.GogduNetEvent")]
-	/** 특정 소켓의 연결 시도가 서버 최대 인원 초과로 인해 실패한 경우에 발생한다.
+	/** 어떤 소켓의 연결 시도가 서버 최대 인원 초과로 인해 실패한 경우에 발생한다.<p/>
 	 * 연결 실패한 소켓은 바로 끊기지 않으며, 실패했음을 알리는 패킷을 전송한 후 잠깐의 시간 뒤에 자동으로 끊는다.
-	 * ( 실패한 소켓의 클라이언트에선 GogduNetEvent.CONNECT_FAIL 이벤트가 발생하지 않는다.
-	 * 오히려 인원 초과 검사를 위해 잠깐 동안 연결이 되었으므로 GogduNetEvent.CONNECT 이벤트가 발생하고 잠시 뒤에 GogduNetEvent.CLOSE 이벤트가 발생한다.
-	 * 단지 실패했음을 알리는 Definition 데이터를 전송 받을 뿐이다.(dataDefinition:Connect.Fail.Saturation) )
-	 * </br>( data:{address:실패한 소켓의 address, port:실패한 소켓의 포트} )
+	 * <p/>( data:{address:실패한 소켓의 address, port:실패한 소켓의 포트} )
 	 */
 	[Event(name="socketConnectFail", type="gogduNet.events.GogduNetEvent")]
 	/** 연결이 업데이트(정보를 수신)되면 발생 */
 	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
-	/** 특정 소켓과의 연결이 비자발적으로 끊긴 경우 발생(closeSocket() 함수로는 발생하지 않는다)
-	 * </br>( data:{id:끊긴 소켓의 id, address:끊긴 소켓의 address, port:끊긴 소켓의 포트} )
+	/** 어떤 소켓과의 연결이 비자발적으로 끊긴 경우 발생(closeSocket() 함수로는 발생하지 않는다)
+	 * <p/>( data:{id:끊긴 소켓의 id, address:끊긴 소켓의 address, port:끊긴 소켓의 포트} )
 	 */
 	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
 	/** 정상적인 데이터를 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
-	 * </br>(id:데이터를 보낸 소켓의 id, dataType, dataDefinition, data)
+	 * <p/>(id:데이터를 보낸 소켓의 id, dataType, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
 	/** 정상적이지 않은 데이터를 수신했을 때 발생
-	 * </br>(id:데이터를 보낸 피어의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷의 ByteArray)
+	 * <p/>(id:데이터를 보낸 피어의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷의 ByteArray)
 	 */
 	[Event(name="invalidPacket", type="gogduNet.events.DataEvent")]
 	
-	/** JSON 문자열을 기반으로 하여 통신하는 TCP 서버
+	/** JSON 문자열을 기반으로 하여 통신하는 TCP 서버<p/>
 	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
 	 * 
 	 * @langversion 3.0
@@ -106,9 +105,11 @@ package gogduNet.connection
 		
 		/** <p>serverAddress : 서버로 사용할 address</p>
 		 * <p>serverPort : 서버로 사용할 포트</p>
-		 * <p>maxSockets : 최대 인원 수 제한. 음수로 설정한 경우 따로 제한을 두지 않음. </p>
+		 * <p>maxSockets : 최대 인원 수 제한.<p/>
+		 * 음수로 설정한 경우 따로 제한을 두지 않음. </p>
 		 * <p>timerInterval : 정보 수신과 연결 검사를 할 때 사용할 타이머의 반복 간격(ms)</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)(여기서 설정한 시간 동안 소켓으로부터 데이터가 오지 않으면 그 소켓과는 연결이 끊긴 것으로 간주한다.)</p>
+		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
+		 * (여기서 설정한 시간 동안 소켓으로부터 데이터가 오지 않으면 그 소켓과는 연결이 끊긴 것으로 간주한다.)</p>
 		 * <p>encoding : 통신을 할 때 사용할 인코딩 형식</p>
 		 */
 		public function TCPServer(serverAddress:String="0.0.0.0", serverPort:int=0, maxSockets:int=10, socketSecurity:SocketSecurity=null, timerInterval:Number=100,

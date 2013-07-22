@@ -23,7 +23,7 @@
 		public static const JSON:String = "json";
 		
 		/** 바이트 정보를 가진 패킷의 타입을 정의하는 상수.
-		 * GogduNetBinaryServer과 GogduNetBinaryClient에서만 쓰인다.
+		 * TCPBinaryServer과 TCPBinaryClient에서만 쓰인다.
 		 */
 		public static const BYTES:String = "bts";
 		

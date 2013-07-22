@@ -20,29 +20,31 @@ package gogduNet.connection
 	import gogduNet.utils.makePacket;
 	import gogduNet.utils.parsePacket;
 	
-	/** 운영체제 등에 의해 비자발적으로 수신이 끊긴 경우 발생(close() 함수로는 발생하지 않는다.) */
+	/** 운영체제 등에 의해 비자발적으로 수신이 끊긴 경우 발생<p/>
+	 * (close() 함수로는 발생하지 않는다.)
+	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
 	/** 연결이 업데이트(정보를 수신)되면 발생 */
 	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
 	/** 허용되지 않은 대상에게서 정보가 전송되면 발생
-	 * </br>( data:{address:대상의 address, port:대상의 포트} )
+	 * <p/>( data:{address:대상의 address, port:대상의 포트} )
 	 */
 	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
-	/** 특저 연결이 연결 지연 한계를 초과한 시간 동안 정보를 수신해 오지 않아
+	/** 어떤 연결이 연결 지연 한계를 초과한 시간 동안 정보를 수신해 오지 않아
 	 * 그 연결에 관한 저장된 데이터를 지운 경우 발생
-	 * </br>( data:{id:지워진 연결의 id, address:지워진 연결의 address, port:지워진 연결의 포트} )
+	 * <p/>( data:{id:지워진 연결의 id, address:지워진 연결의 address, port:지워진 연결의 포트} )
 	 */
 	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
 	/** 정상적인 데이터를 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
-	 * </br>(id:데이터를 보낸 연결의 id, dataType, dataDefinition, data)
+	 * <p/>(id:데이터를 보낸 연결의 id, dataType, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
 	/** 정상적이지 않은 데이터를 수신했을 때 발생
-	 * </br>(id:데이터를 보낸 연결의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷의 ByteArray)
+	 * <p/>(id:데이터를 보낸 연결의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷의 ByteArray)
 	 */
 	[Event(name="invalidPacket", type="gogduNet.events.DataEvent")]
 	
-	/** JSON 문자열을 기반으로 하여 통신하는 UDP 클라이언트
+	/** JSON 문자열을 기반으로 하여 통신하는 UDP 클라이언트<p/>
 	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
 	 * 
 	 * @langversion 3.0
@@ -93,11 +95,16 @@ package gogduNet.connection
 		/** UDPConnection 객체용 오브젝트 풀 */
 		private var _connectionPool:ObjectPool;
 		
-		/** <p>address : 바인드할 local address (주로 자신의 address)</p>
-		 * <p>port : 바인드할 local 포트 (주로 자신의 포트)</p>
-		 * <p>connectionSecurity : 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체. 값이 null인 경우 자동으로 생성(new SocketSecurity(false))</p>
+		/** <p>address : 바인드할 local address<p/>
+		 * (주로 자신의 address)</p>
+		 * <p>port : 바인드할 local 포트<p/>
+		 * (주로 자신의 포트)</p>
+		 * <p>connectionSecurity : 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체.<p/>
+		 * 값이 null인 경우 자동으로 생성(new SocketSecurity(false))</p>
 		 * <p>timerInterval : 정보 수신과 연결 검사를 할 때 사용할 타이머의 반복 간격(ms)</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)(여기서 설정한 시간 동안 서버로부터 데이터가 오지 않으면 서버와 연결이 끊긴 것으로 간주한다) (설명에선 편의상 연결이란 단어를 썼지만, 정확한 의미는 조금 다르다. UDP 통신은 상대가 수신 가능한지를 따지지 않고 그냥 데이터를 보내기만 한다. 설명에서 연결이 끊긴 것으로 간주한다는 말은, 그 대상으로부터 받아 저장해 두고 있던 정보를 없애겠다는 뜻이다.)</p>
+		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
+		 * (여기서 설정한 시간 동안 서버로부터 데이터가 오지 않으면 서버와 연결이 끊긴 것으로 간주한다)<p/>
+		 * (설명에선 편의상 연결이란 단어를 썼지만, 정확한 의미는 조금 다르다. UDP 통신은 상대가 수신 가능한지를 따지지 않고 그냥 데이터를 보내기만 한다. 설명에서 연결이 끊긴 것으로 간주한다는 말은, 그 대상으로부터 받아 저장해 두고 있던 정보를 없애겠다는 뜻이다.)</p>
 		 * <p>encoding : 통신을 할 때 사용할 인코딩 형식</p>
 		 */
 		public function UDPClient(address:String="0.0.0.0", port:int=0, connectionSecurity:SocketSecurity=null, 
@@ -276,7 +283,7 @@ package gogduNet.connection
 			dispatchEvent(_event);
 		}
 		
-		/** 연결 중인 수를 가지고 온다.</br>
+		/** 연결 중인 수를 가지고 온다.<p/>
 		 * ( 편의상 연결이란 단어를 썼지만, 정확히는 최근에(connectionDelayLimit를 초과하지 않은 시간 안에)
 		 * 통신(데이터를 나에게 전송)한 연결들의 수 )
 		 */

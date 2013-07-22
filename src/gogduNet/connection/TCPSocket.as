@@ -5,7 +5,8 @@ package gogduNet.connection
 	import flash.net.Socket;
 	import flash.utils.ByteArray;
 	
-	/** 비자발적으로 연결이 끊긴 경우 발생. 라이브러리 내부에서 사용되는 이벤트로서, 이 이벤트 대신
+	/** 비자발적으로 연결이 끊긴 경우 발생합니다.<p/>
+	 * 라이브러리 내부에서 사용되는 이벤트로서, 이 이벤트 대신
 	 * TCPServer나 TCPBinaryServer의 GogduNetEvent.SOCKET_CLOSE 이벤트를 사용하는 것을 권장합니다.
 	 */
 	[Event(name="close", type="flash.events.Event")]

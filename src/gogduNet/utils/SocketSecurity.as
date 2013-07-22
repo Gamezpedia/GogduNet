@@ -1,5 +1,12 @@
 package gogduNet.utils
 {
+	/** 서버 클래스에서 허용 또는 비허용된 연결들의 목록을 가지는 클래스입니다.<p/>
+	 * 여기서 허용되지 않거나 비허용된 연결의 클라이언트 측에선, 차단되어 연결이 끊겨도
+	 * GogduNetEvent.CONNECT_FAIL 이벤트가 발생하지 않습니다.<p/>
+	 * (즉, 연결을 경고나 알림 없이 바로 끊습니다)<p/>
+	 * 
+	 * (P2PClient에서만 특수하게, 객체에 추가할 Object 객체의 address 속성을 peerID로, port 속성을 음수로 설정해야 합니다.)
+	 */
 	public class SocketSecurity
 	{
 		private var _isPermission:Boolean;
@@ -7,7 +14,6 @@ package gogduNet.utils
 		//{address, port}
 		private var _sockets:Vector.<Object>;
 		
-		/** (GogduNetP2PClient에서만 특수하게, 객체에 추가할 Object 객체의 address 속성을 peerID로, port 속성을 음수로 설정해야 합니다.) */
 		public function SocketSecurity(isPermission:Boolean, sockets:Vector.<Object>=null)
 		{
 			_isPermission = isPermission;

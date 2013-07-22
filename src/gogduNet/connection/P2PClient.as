@@ -20,46 +20,48 @@ package gogduNet.connection
 	import gogduNet.utils.makePacket;
 	import gogduNet.utils.parsePacket;
 	
-	/** 연결에 성공한 경우 발생한다. 하지만 연결 직후엔 연결이 불안정하여 전송이 (매우)잘 되지 않으므로
-	 * 연결이 안정된 후에 통신하는 것이 좋다.
+	/** 연결에 성공한 경우 발생한다.<p/>
+	 * 하지만 연결 직후엔 연결이 불안정하여 전송이 (매우)잘 되지 않으므로
+	 * 연결이 안정된 후에 통신하는 것이 좋다.<p/>
 	 * (타이머로 연결 후 일정 시간 뒤에 전송하거나, 연결 시험용 패킷을 연결한 후로 계속 반복해서 보내어
 	 * 연결이 안정되었는지를 검사하세요)
-	 * </br>(data:"NetGroup.Connect.Success")
+	 * <p/>(data:"NetGroup.Connect.Success")
 	 */
 	[Event(name="connect", type="gogduNet.events.GogduNetEvent")]
-	/** 비자발적으로 연결이 끊긴 경우 발생(close() 함수로는 발생하지 않는다.)
-	 * </br>( data:연결이 끊긴 이유("NetConnection.Connect.AppShutdown" or "NetConnection.Connect.InvalidApp" or
+	/** 비자발적으로 연결이 끊긴 경우 발생<p/>
+	 * (close() 함수로는 발생하지 않는다.)
+	 * <p/>( data:연결이 끊긴 이유("NetConnection.Connect.AppShutdown" or "NetConnection.Connect.InvalidApp" or
 	 * "NetConnection.Connect.Rejected" or "NetConnection.Connect.IdleTimeout") )
 	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
 	/** 연결이 업데이트(정보를 수신)되면 발생 */
 	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
 	/** 이웃(다른 피어)과 연결된 경우 발생
-	 * </br>(data:연결된 피어의 id)
+	 * <p/>(data:연결된 피어의 id)
 	 */
 	[Event(name="socketConnect", type="gogduNet.events.GogduNetEvent")]
-	/** 비자발적으로 이웃(다른 피어)과의 연결이 끊긴 경우 발생
-	 * </br>(data:연결된 피어의 peerID)
+	/** 이웃(다른 피어)과의 연결이 끊긴 경우 발생
+	 * <p/>(data:끊긴 피어의 peerID)
 	 */
 	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
 	/** 허용되지 않은 대상이 연결을 시도하면 발생
-	 * </br>(data:대상의 peerID)
+	 * <p/>(data:대상의 peerID)
 	 */
 	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
 	/** 연결에 실패한 경우 발생
-	 * </br>( data:연결에 실패한 이유("NetConnection.Connect.Failed" or "NetGroup.Connect.Failed") )
+	 * <p/>( data:연결에 실패한 이유<p/>("NetConnection.Connect.Failed" or "NetGroup.Connect.Failed") )
 	 */
 	[Event(name="connectFail", type="gogduNet.events.GogduNetEvent")]
 	/** 정상적인 데이터를 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
-	 * </br>(id:데이터를 보낸 피어의 id, dataType, dataDefinition, data)
+	 * <p/>(id:데이터를 보낸 피어의 id, dataType, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
 	/** 정상적이지 않은 데이터를 수신했을 때 발생
-	 * </br>(id:데이터를 보낸 피어의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷 문자열)
+	 * <p/>(id:데이터를 보낸 피어의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷 문자열)
 	 */
 	[Event(name="invalidPacket", type="gogduNet.events.DataEvent")]
 	
-	/** JSON 문자열을 기반으로 하여 통신하는 어도비 Cirrus P2P 클라이언트
+	/** JSON 문자열을 기반으로 하여 통신하는 어도비 Cirrus P2P 클라이언트<p/>
 	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
 	 * 
 	 * @langversion 3.0
@@ -106,11 +108,14 @@ package gogduNet.connection
 		private var _socketSecurity:SocketSecurity;
 		
 		/** <p>url : 접속할 주소(rtmfp)</p>
-		 * <p>name : NetGroup 이름</p>
-		 * <p>socketSecurity : 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체. 값이 null인 경우 자동으로 생성(new SocketSecurity(false))</p>
-		 * <p>timerInterval : 타이머 간격(ms)(GogduNetP2PClient의 timer는 정보 수신을 겸하지 않고 오로지 연결 검사용으로만 쓰이기 때문에 반복 속도(timerInterval)가 조금
+		 * <p>netGroupName : NetGroup 이름</p>
+		 * <p>socketSecurity : 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체.<p/>
+		 * 값이 null인 경우 자동으로 생성(new SocketSecurity(false))</p>
+		 * <p>timerInterval : 타이머 간격(ms)<p/>
+		 * (P2PClient의 timer는 정보 수신을 겸하지 않고 오로지 연결 검사용으로만 쓰이기 때문에 반복 속도(timerInterval)가 조금
 		 * 느려도 괜찮습니다.)</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)(여기서 설정한 시간 동안 특정 피어로부터 데이터가 오지 않으면 그 피어와 연결이 끊긴 것으로 간주한다.)</p>
+		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
+		 * (여기서 설정한 시간 동안 특정 피어로부터 데이터가 오지 않으면 그 피어와 연결이 끊긴 것으로 간주한다.)</p>
 		 */
 		public function P2PClient(url:String, netGroupName:String="GogduNet", socketSecurity:SocketSecurity=null, timerInterval:Number=1000, connectionDelayLimit:Number=10000)
 		{
