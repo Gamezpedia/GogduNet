@@ -19,41 +19,43 @@ package gogduNet.connection
 	import gogduNet.utils.makePacket;
 	import gogduNet.utils.parsePacket;
 	
-	/** 연결이 성공한 경우 발생합니다. */
+	/** This occurs when connection succeed. */
 	[Event(name="connect", type="gogduNet.events.GogduNetEvent")]
-	/** 서버 등에 의해 비자발적으로 연결이 끊긴 경우 발생<p/>
-	 * (close() 함수로는 발생하지 않는다.) */
+	/** This occurs when involuntary closed connection because of server, etc.<p/>
+	 * (Does not occurs when close() function)
+	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
-	/** 정상적인 데이터를 완전히 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
+	/** This occurs when received whole packet and Packet is dispatch to event after processed
 	 * <p/>(dataType:DataType.BYTES, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
-	/** 데이터를 전송 받는 중일 때 발생. 지금까지 전송 받은 데이터가 이벤트로 전달된다.<p/>
-	 * (dataDefinition 속성이 존재하면 사용자가 보낸 (헤더와 프로토콜을 제외한)실질적인 데이터의 전송 상태를
-	 * data 속성으로 전달하며, dataDefinition 속성이 존재하지 않으면(null)
-	 * 아직 헤더나 프로토콜이 다 전송되지 않은 걸 의미하며, 헤더와 프로토콜이 포함된 바이트 배열이 전달된다)<p/>
-	 * (데이터의 크기가 적어 너무 빨리 다 받은 경우엔 이 이벤트가 발생하지 않을 수도 있다.)
+	/** This occurs when receiving data and Data which received until now is dispatch to event.<p/>
+	 * (If exists 'dataDefinition' property of event, 'data' property is received data
+	 * Or else if does not exist(value is null) 'dataDefinition' property,
+	 * It signifies Header or protocol weren't sent yet
+	 * and byteArray which included partial Header and protocol is dispatch to event)<p/>
+	 * (This event does not always occur. If so fast received data, this event may not occur.)
 	 * <p/>(dataType:DataType.BYTES, dataDefinition:null or String, data:null or ByteArray)
 	 */
 	[Event(name="progressData", type="gogduNet.events.DataEvent")]
-	/** 연결 시도가 실패한 경우 발생한다.<p/>
-	 * IOErrorEvent.IO_ERROR : IO_ERROR로 연결 실패<p/>
-	 * SecurityErrorEvent.SECURITY_ERROR : SECURITY_ERROR로 연결 실패<p/>
-	 * "Timeout" : 연결 시간 초과<p/>
-	 * "Saturation" : 서버측 최대 인원 초과
-	 * <p/>( data:<p/>실패한 이유(IOErrorEvent.IO_ERROR or SecurityErrorEvent.SECURITY_ERROR or "Timeout" or "Saturation") )
+	/** This occurs when failed to connecting.<p/>
+	 * IOErrorEvent.IO_ERROR : Failed to connecting because IO_ERROR<p/>
+	 * SecurityErrorEvent.SECURITY_ERROR : Failed to connecting because SECURITY_ERROR<p/>
+	 * "Timeout" : Connection timeout<p/>
+	 * "Saturation" : Exceeded maximum connection number of server
+	 * <p/>( data:<p/>Why failed(IOErrorEvent.IO_ERROR or SecurityErrorEvent.SECURITY_ERROR or "Timeout" or "Saturation") )
 	 */
 	[Event(name="connectFail", type="gogduNet.events.GogduNetEvent")]
-	/** 연결이 업데이트(정보를 수신)되면 발생 */
+	/** This occurs when update connection. (When received data) */
 	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
 	
-	/** 2진 파일 전송용 TCP 클라이언트입니다.<p/>
+	/** For binary communication, TCP client<p/>
 	 * 한 번에 최대 4기가의 데이터를 전송할 수 있으며, 수신 진행 상황을
 	 * 이벤트로 알려주므로 파일 전송용으로 사용하기 좋습니다.<p/>
 	 * 주의할 점으로 전송할 데이터의 크기(용량)이 큰 경우, TCP의 특성상 하나의 연결(하나의 TCPBinaryClient 객체)에선
 	 * 한 번에 하나의 데이터만 전송하는 것이 좋습니다.<p/>
 	 * (이전의 데이터가 모두 전송되기 전에 다른 데이터를 다시 전송하지 마세요)<p/>
-	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
+	 * (Unlike Socket of native flash, this is usable after close() function)
 	 * 
 	 * @langversion 3.0
 	 * @playerversion Flash Player 11
@@ -93,12 +95,12 @@ package gogduNet.connection
 		/** GogduNetEvent.CONNECTION_UPDATE 이벤트 객체 */
 		private var _event:GogduNetEvent;
 		
-		/** <p>serverAddress : 연결할 서버의 address</p>
-		 * <p>serverPort : 연결할 서버의 포트</p>
-		 * <p>timerInterval : 정보 수신과 연결 검사를 할 때 사용할 타이머의 반복 간격(ms)</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
-		 * (여기서 설정한 시간 동안 서버로부터 데이터가 오지 않으면 서버와 연결이 끊긴 것으로 간주한다.)</p>
-		 * <p>encoding : 프로토콜 문자열의 변환에 사용할 인코딩 형식</p>
+		/** <p>serverAddress : Address of server to connect</p>
+		 * <p>serverPort : Port of server to connect</p>
+		 * <p>timerInterval : Delay of Timer for to check connection and receive data.(ms)</p>
+		 * <p>connectionDelayLimit : Connection delay limit(ms)<p/>
+		 * (If data does not come from server for the time set here, consider disconnected with server.)</p>
+		 * <p>encoding : Encoding format for to convert protocol byte to string.</p>
 		 */
 		public function TCPBinaryClient(serverAddress:String, serverPort:int, timerInterval:Number=100,
 										connectionDelayLimit:Number=10000, encoding:String="UTF-8")
@@ -117,7 +119,7 @@ package gogduNet.connection
 			_event = new GogduNetEvent(GogduNetEvent.CONNECTION_UPDATE, false, false, null);
 		}
 		
-		/** 내부적으로 정보 수신이나 연결 검사 등을 위해 사용되는 타이머의 재생 간격을 가져오거나 설정한다.(ms) */
+		/** Get or set delay of Timer for to check connection and receive data.(ms) */
 		public function get timerInterval():Number
 		{
 			return _timer.delay;
@@ -127,8 +129,8 @@ package gogduNet.connection
 			_timer.delay = value;
 		}
 		
-		/** 연결 지연 한계 시간을 가져오거나 설정한다.(ms)
-		 * 이 시간을 넘도록 정보가 수신되지 않은 경우엔 연결이 끊긴 것으로 간주하고 이쪽에서도 연결을 끊는다.
+		/** Get or set connection delay limit.(ms)<p/>
+		 * (If data does not come from server for the time set here, consider disconnected with server.)
 		 */
 		public function get connectionDelayLimit():Number
 		{
@@ -139,13 +141,13 @@ package gogduNet.connection
 			_connectionDelayLimit = value;
 		}
 		
-		/** 플래시의 네이티브 소켓을 가져온다. */
+		/** Get native socket of flash */
 		public function get socket():Socket
 		{
 			return _socket;
 		}
 		
-		/** 서버의 address를 가져오거나 설정한다. 설정은 연결하고 있지 않을 때에만 할 수 있다. */
+		/** Get or set address of server. Can be set only if not connected. */
 		public function get serverAddress():String
 		{
 			return _serverAddress;
@@ -160,7 +162,7 @@ package gogduNet.connection
 			_serverAddress = value;
 		}
 		
-		/** 서버의 포트를 가져오거나 설정한다. 설정은 연결하고 있지 않을 때에만 할 수 있다. */
+		/** Get or set port of server. Can be set only if not connected. */
 		public function get serverPort():int
 		{
 			return _serverPort;
@@ -175,7 +177,7 @@ package gogduNet.connection
 			_serverPort = value;
 		}
 		
-		/** 프로토콜 바이트의 문자열 변환에 사용할 인코딩 유형을 가져오거나 설정한다. 설정은 연결하고 있지 않을 때에만 할 수 있다. */
+		/** Get or set encoding format for to convert protocol byte to string. Can be set only if not connected. */
 		public function get encoding():String
 		{
 			return _encoding;
@@ -190,19 +192,19 @@ package gogduNet.connection
 			_encoding = value;
 		}
 		
-		/** 현재 연결되어 있는가를 나타내는 값을 가져온다. */
+		/** Get whether currently connected */
 		public function get isConnected():Boolean
 		{
 			return _isConnected;
 		}
 		
-		/** 디버그용 기록을 가지고 있는 RecordConsole 객체를 가져온다. */
+		/** Get RecordConsole Object which has record for debug */
 		public function get record():RecordConsole
 		{
 			return _record;
 		}
 		
-		/** 연결된 후 시간이 얼마나 지났는지를 나타내는 Number 값을 가져온다.(ms) */
+		/** Get elapsed time after connected.(ms) */
 		public function get elapsedTimeAfterConnected():Number
 		{
 			if(_isConnected == false)
@@ -213,14 +215,14 @@ package gogduNet.connection
 			return getTimer() - _connectedTime;
 		}
 		
-		/** 마지막으로 연결된 시각으로부터 지난 시간을 가져온다.(ms) */
+		/** Get elapsed time after last received.(ms) */
 		public function get elapsedTimeAfterLastReceived():Number
 		{
 			return getTimer() - _lastReceivedTime;
 		}
 		
-		/** 마지막으로 연결된 시각을 갱신한다.
-		 * (서버에게서 정보가 들어온 경우 자동으로 이 함수가 실행되어 갱신된다.)
+		/** Update last received time.
+		 * (Automatically updates by execute this function when received data from server)
 		 */
 		public function updateLastReceivedTime():void
 		{
@@ -251,7 +253,7 @@ package gogduNet.connection
 			_isConnected = false;
 		}
 		
-		/** 서버와 연결을 시도한다. */
+		/** Tries to connect with server. */
 		public function connect():void
 		{
 			if(!_serverAddress || _isConnected == true)
@@ -271,10 +273,9 @@ package gogduNet.connection
 			_socket.removeEventListener(IOErrorEvent.IO_ERROR, _socketConnectFail);
 			_socket.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, _socketConnectFail2);
 			
-			_connectedTime = getTimer();
 			updateLastReceivedTime();
 			
-			_record.addRecord(true, "(Before validate)Connected to server(connectedTime:" + _connectedTime + ")");
+			_record.addRecord(true, "(Before validate)Connected to server");
 			
 			_timer.start();
 			_timer.addEventListener(TimerEvent.TIMER, _timerFunc);
@@ -289,6 +290,8 @@ package gogduNet.connection
 			if(e.dataDefinition == "Connect.Success")
 			{
 				this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+				
+				_connectedTime = getTimer();
 				
 				_record.addRecord(true, "(After validate)Connected to server(connectedTime:" + _connectedTime + ")");
 				
@@ -355,7 +358,7 @@ package gogduNet.connection
 			dispatchEvent( new GogduNetEvent(GogduNetEvent.CONNECT_FAIL, false, false, e.type) );
 		}
 		
-		/** 서버와의 연결을 끊는다. */
+		/** Close connection with server. */
 		public function close():void
 		{
 			if(_isConnected == false)

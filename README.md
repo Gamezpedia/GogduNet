@@ -3,7 +3,7 @@
 
 **GogduNet** - Flash AS3 Communication Library for **TCP** and **UDP** and **P2P**
 
-Version 2.20 (2013.7.22.)
+Version 2.21 (2013.7.23.)
 
 Made by **Siyania**
 (siyania@naver.com)

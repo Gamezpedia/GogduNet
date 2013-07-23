@@ -23,40 +23,44 @@ package gogduNet.connection
 	import gogduNet.utils.parsePacket;
 	import gogduNet.utils.DataType;
 	
-	/** 허용되지 않은 대상에게서 정보가 전송되면 발생<p/>
-	 * <p/>( data:{address:대상의 address, port:대상의 포트} )
+	/** This occurs when Unpermitted target tried to connect
+	 * <p/>( data:{address:Target's address, port:Target's port} )
 	 */
 	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
-	/** 운영체제 등에 의해 비자발적으로 서버가 닫힌 경우 발생<p/>
-	 * (close() 함수로는 발생하지 않는다.)
+	/** This occurs when involuntary closed server because of OS, etc.<p/>
+	 * (Does not occurs when close() function)
 	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
-	/** 어떤 소켓이 성공적으로 접속한 경우 발생
-	 * <p/>(data:소켓의 id)
+	/** This occurs when what socket was connection succeed
+	 * <p/>(data:ID of socket)
 	 */
 	[Event(name="socketConnect", type="gogduNet.events.GogduNetEvent")]
-	/** 어떤 소켓의 연결 시도가 서버 최대 인원 초과로 인해 실패한 경우에 발생한다.<p/>
-	 * 연결 실패한 소켓은 바로 끊기지 않으며, 실패했음을 알리는 패킷을 전송한 후 잠깐의 시간 뒤에 자동으로 끊는다.
-	 * <p/>( data:{address:실패한 소켓의 address, port:실패한 소켓의 포트} )
+	/** This occurs when what socket failed to connecting
+	 * because Exceeded the maximum connection number of server.<p/>
+	 * Not close immediately connection with the socket that failed to connect.
+	 * Close connecton with the socket elapsed certain time
+	 * after automatically sends a packet that indicating connection is failed.
+	 * <p/>( data:{address:Address of failed socket, port:Port of failed socket} )
 	 */
 	[Event(name="socketConnectFail", type="gogduNet.events.GogduNetEvent")]
-	/** 연결이 업데이트(정보를 수신)되면 발생 */
+	/** This occurs when update connection. (When received data) */
 	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
-	/** 어떤 소켓과의 연결이 비자발적으로 끊긴 경우 발생(closeSocket() 함수로는 발생하지 않는다)
-	 * <p/>( data:{id:끊긴 소켓의 id, address:끊긴 소켓의 address, port:끊긴 소켓의 포트} )
+	/** This occurs when involuntary closed connection with what socket<p/>
+	 * (Does not occurs when closeSocket() function)
+	 * <p/>( data:{id:ID of closed socket, address:Address of closed socket, port:Port of closed socket} )
 	 */
 	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
-	/** 정상적인 데이터를 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
-	 * <p/>(id:데이터를 보낸 소켓의 id, dataType, dataDefinition, data)
+	/** This occurs when received whole packet and Packet is dispatch to event after processed
+	 * <p/>(id:ID of socket that sent packet, dataType, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
-	/** 정상적이지 않은 데이터를 수신했을 때 발생
-	 * <p/>(id:데이터를 보낸 피어의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷의 ByteArray)
+	/** This occurs when received abnormal packet
+	 * <p/>(id:ID of socket that sent packet, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:ByteArray of abnormal packet)
 	 */
 	[Event(name="invalidPacket", type="gogduNet.events.DataEvent")]
 	
-	/** JSON 문자열을 기반으로 하여 통신하는 TCP 서버<p/>
-	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
+	/** TCP server which communicate by base on JSON string<p/>
+	 * (Unlike Socket of native flash, this is usable after close() function)
 	 * 
 	 * @langversion 3.0
 	 * @playerversion AIR 3.0 Desktop
@@ -103,14 +107,14 @@ package gogduNet.connection
 		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체 */
 		private var _socketSecurity:SocketSecurity;
 		
-		/** <p>serverAddress : 서버로 사용할 address</p>
-		 * <p>serverPort : 서버로 사용할 포트</p>
-		 * <p>maxSockets : 최대 인원 수 제한.<p/>
-		 * 음수로 설정한 경우 따로 제한을 두지 않음. </p>
-		 * <p>timerInterval : 정보 수신과 연결 검사를 할 때 사용할 타이머의 반복 간격(ms)</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
-		 * (여기서 설정한 시간 동안 소켓으로부터 데이터가 오지 않으면 그 소켓과는 연결이 끊긴 것으로 간주한다.)</p>
-		 * <p>encoding : 통신을 할 때 사용할 인코딩 형식</p>
+		/** <p>serverAddress : address for use on server.</p>
+		 * <p>serverPort : port for use on server.</p>
+		 * <p>maxSockets : Limit the maximum number of connection.<p/>
+		 * If set negative number, is not limited.</p>
+		 * <p>timerInterval : Delay of Timer for to check connection and receive data.(ms)</p>
+		 * <p>connectionDelayLimit : Connection delay limit(ms)<p/>
+		 * (If data does not come from what socket for the time set here, consider disconnected with one.)</p>
+		 * <p>encoding : Encoding format for communication</p>
 		 */
 		public function TCPServer(serverAddress:String="0.0.0.0", serverPort:int=0, maxSockets:int=10, socketSecurity:SocketSecurity=null, timerInterval:Number=100,
 								  connectionDelayLimit:Number=10000, encoding:String="UTF-8")
@@ -141,35 +145,35 @@ package gogduNet.connection
 			_socketSecurity = socketSecurity;
 		}
 		
-		/** 서버 실행용 타이머의 재생 간격을 가져온다. */
+		/** Get or set delay of Timer for to check connection and receive data.(ms) */
 		public function get timerInterval():Number
 		{
 			return _timer.delay;
 		}
-		/** 서버 실행용 타이머의 재생 간격을 설정한다. */
 		public function set timerInterval(value:Number):void
 		{
 			_timer.delay = value;
 		}
 		
-		/** 연결 지연 한계를 가져온다.(ms) */
+		/** Get or set connection delay limit.(ms)<p/>
+		 * (If data does not come from what socket for the time set here, consider disconnected with one.)
+		 */
 		public function get connectionDelayLimit():Number
 		{
 			return _connectionDelayLimit;
 		}
-		/** 연결 지연 한계를 설정한다.(ms) */
 		public function set connectionDelayLimit(value:Number):void
 		{
 			_connectionDelayLimit = value;
 		}
 		
-		/** 플래시 네이티브 서버 소켓을 가져온다. */
+		/** Get native server socket of flash */
 		public function get socket():ServerSocket
 		{
 			return _socket;
 		}
 		
-		/** 서버의 address를 가져오거나 설정한다. 설정은 서버가 실행되고 있지 않을 때에만 할 수 있다. */
+		/** Get or set address of server. Can be set only if server is closed */
 		public function get address():String
 		{
 			return _address;
@@ -184,7 +188,7 @@ package gogduNet.connection
 			_address = value;
 		}
 		
-		/** 서버의 포트를 가져오거나 설정한다. 설정은 서버가 실행되고 있지 않을 때에만 할 수 있다. */
+		/** Get or set port of server. Can be set only if server is closed */
 		public function get port():int
 		{
 			return _port;
@@ -199,7 +203,7 @@ package gogduNet.connection
 			_port = value;
 		}
 		
-		/** 서버의 통신 인코딩 유형을 가져오거나 설정한다. 설정은 서버가 실행되고 있지 않을 때에만 할 수 있다. */
+		/** Get or set encoding format for to convert protocol byte to string. Can be set only if server is closed */
 		public function get encoding():String
 		{
 			return _encoding;
@@ -214,13 +218,14 @@ package gogduNet.connection
 			_encoding = value;
 		}
 		
-		/** 서버가 실행 중인지를 나타내는 값을 가져온다. */
+		/** Get whether server is running*/
 		public function get isRunning():Boolean
 		{
 			return _run;
 		}
 		
-		/** 서버의 최대 인원 제한 수를 가져오거나 설정한다. (이 값은 새로 들어오는 연결에만 영향을 주며, 기존 연결은 끊어지지 않는다.)*/
+		/** Get or set limit the maximum number of connection.<p/>
+		 * (This value affects only new incoming connections and Existing connections does not close.)*/
 		public function get maxSockets():int
 		{
 			return _maxSockets;
@@ -230,7 +235,7 @@ package gogduNet.connection
 			_maxSockets = value;
 		}
 		
-		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체를 가져오거나 설정한다. */
+		/** Get or set SocketSecurity type object which has list of Permitted or Unpermitted connection. */
 		public function get socketSecurity():SocketSecurity
 		{
 			return _socketSecurity;
@@ -240,27 +245,25 @@ package gogduNet.connection
 			_socketSecurity = value;
 		}
 		
-		/** 서버의 현재 인원을 가져온다. */
+		/** Get the number of connected sockets. */
 		public function get numSockets():int
 		{
 			return _socketArray.length;
 		}
 		
-		/** 디버그용 기록을 가지고 있는 RecordConsole 객체를 가져온다. */
+		/** Get RecordConsole Object which has record for debug */
 		public function get record():RecordConsole
 		{
 			return _record;
 		}
 		
-		/** 소켓용 오브젝트 풀을 가져온다. */
+		/** Get object pool for TCPSocket objects */
 		public function get socketPool():ObjectPool
 		{
 			return _socketPool;
 		}
 		
-		/** 서버가 시작된 후 시간이 얼마나 지났는지를 나타내는 Number 값을 가져온다.(ms)
-		 * 서버가 실행 중이 아닌 경우엔 -1을 반환한다.
-		 */
+		/** Get elapsed time after run.(ms) */
 		public function get elapsedTimeAfterRun():Number
 		{
 			if(_run == false)
@@ -271,14 +274,14 @@ package gogduNet.connection
 			return getTimer() - _runnedTime;
 		}
 		
-		/** 마지막으로 연결된 시각으로부터 지난 시간을 가져온다.(ms) */
+		/** Get elapsed time after last received.(ms) */
 		public function get elapsedTimeAfterLastReceived():Number
 		{
 			return getTimer() - _lastReceivedTime;
 		}
 		
-		/** 마지막으로 연결된 시각을 갱신한다.
-		 * (정보가 들어온 경우 자동으로 이 함수가 실행되어 갱신된다.)
+		/** Update last received time.
+		 * (Automatically updates by execute this function when received data)
 		 */
 		private function updateLastReceivedTime():void
 		{
@@ -474,33 +477,33 @@ package gogduNet.connection
 		/** address와 포트가 모두 일치하는 소켓들을 가져온다. */
 		/*public function getSocketsByAddressAndPort(address:String, port:int, resultVector:Vector.<TCPSocket>=null):Vector.<TCPSocket>
 		{
-			if(resultVector == null)
-			{
-				resultVector = new Vector.<TCPSocket>();
-			}
-			
-			var i:int;
-			var socket:TCPSocket;
-			
-			for(i = 0; i < _socketArray.length; i += 1)
-			{
-				if(_socketArray[i] == null)
-				{
-					continue;
-				}
-				socket =_socketArray[i];
-				if(socket.isConnected == false)
-				{
-					continue;
-				}
-				
-				if(socket.address == address && socket.port == port)
-				{
-					resultVector.push(socket);
-				}
-			}
-			
-			return resultVector;
+		if(resultVector == null)
+		{
+		resultVector = new Vector.<TCPSocket>();
+		}
+		
+		var i:int;
+		var socket:TCPSocket;
+		
+		for(i = 0; i < _socketArray.length; i += 1)
+		{
+		if(_socketArray[i] == null)
+		{
+		continue;
+		}
+		socket =_socketArray[i];
+		if(socket.isConnected == false)
+		{
+		continue;
+		}
+		
+		if(socket.address == address && socket.port == port)
+		{
+		resultVector.push(socket);
+		}
+		}
+		
+		return resultVector;
 		}*/
 		
 		public function dispose():void
@@ -548,7 +551,7 @@ package gogduNet.connection
 			_run = false;
 		}
 		
-		/** 서버 작동 시작 */
+		/** Start server */
 		public function run():void
 		{
 			if(!_address || _run == true)
@@ -576,7 +579,7 @@ package gogduNet.connection
 			dispatchEvent(new GogduNetEvent(GogduNetEvent.CLOSE));
 		}
 		
-		/** 서버 작동 중지 */
+		/** Close server */
 		public function close():void
 		{
 			if(_run == false)
@@ -1095,8 +1098,8 @@ package gogduNet.connection
 			return tf;
 		}
 		
-		/** id가 일치하는 소켓과의 연결을 끊는다.
-		 * (해당 소켓의 클라이언트에게 패킷을 전송하여 알리지 않고 바로 끊는다.)
+		/** After found a socket which matching id, close connection with one.
+		 * (Close right away without sending a packet to notify the closing.)
 		 */
 		public function closeSocket(id:String):void
 		{
@@ -1348,14 +1351,14 @@ package gogduNet.connection
 						if(jsonObj.t == DataType.DEFINITION)
 						{
 							/*_record.addRecord("Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
-								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);*/
+							socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);*/
 							
 							dispatchEvent(new DataEvent(DataEvent.RECEIVE_DATA, false, false, socket.id, jsonObj.t, jsonObj.df, null));
 						}
 						else
 						{
 							/*_record.addRecord("Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
-								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);*/
+							socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);*/
 							
 							dispatchEvent(new DataEvent(DataEvent.RECEIVE_DATA, false, false, socket.id, jsonObj.t, jsonObj.df, jsonObj.dt));
 						}

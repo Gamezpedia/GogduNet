@@ -262,10 +262,9 @@ package gogduNet.connection
 			_socket.removeEventListener(IOErrorEvent.IO_ERROR, _socketConnectFail);
 			_socket.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, _socketConnectFail2);
 			
-			_connectedTime = getTimer();
 			updateLastReceivedTime();
 			
-			_record.addRecord(true, "(Before validate)Connected to server(connectedTime:" + _connectedTime + ")");
+			_record.addRecord(true, "(Before validate)Connected to server");
 			
 			_timer.start();
 			_timer.addEventListener(TimerEvent.TIMER, _timerFunc);
@@ -282,6 +281,8 @@ package gogduNet.connection
 				if(e.dataDefinition == "Connect.Success")
 				{
 					this.removeEventListener(DataEvent.RECEIVE_DATA, _receiveConnectPacket);
+					
+					_connectedTime = getTimer();
 					
 					_record.addRecord(true, "(After validate)Connected to server(connectedTime:" + _connectedTime + ")");
 					

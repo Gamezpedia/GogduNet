@@ -20,49 +20,49 @@ package gogduNet.connection
 	import gogduNet.utils.makePacket;
 	import gogduNet.utils.parsePacket;
 	
-	/** 연결에 성공한 경우 발생한다.<p/>
-	 * 하지만 연결 직후엔 연결이 불안정하여 전송이 (매우)잘 되지 않으므로
-	 * 연결이 안정된 후에 통신하는 것이 좋다.<p/>
-	 * (타이머로 연결 후 일정 시간 뒤에 전송하거나, 연결 시험용 패킷을 연결한 후로 계속 반복해서 보내어
-	 * 연결이 안정되었는지를 검사하세요)
+	/** This occurs when connection succeed.<p/>
+	 * However, transfer is not very good because connection is unstable when immediately after connected,
+	 * therefore you communicate after stabilized connection.<p/>
+	 * (Transmit data after elapsed some time since connected(Use Timer)
+	 * or Check to connection has stabilized, by use keep sending test packet since connected)
 	 * <p/>(data:"NetGroup.Connect.Success")
 	 */
 	[Event(name="connect", type="gogduNet.events.GogduNetEvent")]
-	/** 비자발적으로 연결이 끊긴 경우 발생<p/>
-	 * (close() 함수로는 발생하지 않는다.)
-	 * <p/>( data:연결이 끊긴 이유("NetConnection.Connect.AppShutdown" or "NetConnection.Connect.InvalidApp" or
+	/** This occurs when involuntary closed connection.<p/>
+	 * (Does not occurs when close() function)
+	 * <p/>( data:Why closed connection("NetConnection.Connect.AppShutdown" or "NetConnection.Connect.InvalidApp" or
 	 * "NetConnection.Connect.Rejected" or "NetConnection.Connect.IdleTimeout") )
 	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
-	/** 연결이 업데이트(정보를 수신)되면 발생 */
+	/** This occurs when update connection. (When received data) */
 	[Event(name="connectionUpdate", type="gogduNet.events.GogduNetEvent")]
-	/** 이웃(다른 피어)과 연결된 경우 발생
-	 * <p/>(data:연결된 피어의 id)
+	/** This occurs when connected with Neighbor(Other peer).
+	 * <p/>( data:Connected peer's id(≠peerID) )
 	 */
 	[Event(name="socketConnect", type="gogduNet.events.GogduNetEvent")]
-	/** 이웃(다른 피어)과의 연결이 끊긴 경우 발생
-	 * <p/>(data:끊긴 피어의 peerID)
+	/** This occurs when closed connection with Neighbor(Other peer)
+	 * <p/>( data:Closed peer's peerID(≠id) )
 	 */
 	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
-	/** 허용되지 않은 대상이 연결을 시도하면 발생
-	 * <p/>(data:대상의 peerID)
+	/** This occurs when Unpermitted target tried to connect
+	 * <p/>(data:Target peer's peerID)
 	 */
 	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
-	/** 연결에 실패한 경우 발생
-	 * <p/>( data:연결에 실패한 이유<p/>("NetConnection.Connect.Failed" or "NetGroup.Connect.Failed") )
+	/** This occurs when failed to connecting
+	 * <p/>( data:Why failed("NetConnection.Connect.Failed" or "NetGroup.Connect.Failed") )
 	 */
 	[Event(name="connectFail", type="gogduNet.events.GogduNetEvent")]
-	/** 정상적인 데이터를 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
-	 * <p/>(id:데이터를 보낸 피어의 id, dataType, dataDefinition, data)
+	/** This occurs when received whole packet and Packet is dispatch to event after processed
+	 * <p/>(id:ID of Peer that sent packet, dataType, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
-	/** 정상적이지 않은 데이터를 수신했을 때 발생
-	 * <p/>(id:데이터를 보낸 피어의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷 문자열)
+	/** This occurs when received abnormal packet
+	 * <p/>(id:ID of Peer that sent packet, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:Abnormal packet string)
 	 */
 	[Event(name="invalidPacket", type="gogduNet.events.DataEvent")]
 	
-	/** JSON 문자열을 기반으로 하여 통신하는 어도비 Cirrus P2P 클라이언트<p/>
-	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
+	/** Cirrus P2P client which communicate by base on JSON string<p/>
+	 * (Unlike Socket of native flash, this is usable after close() function)
 	 * 
 	 * @langversion 3.0
 	 * @playerversion Flash Player 11
@@ -70,10 +70,10 @@ package gogduNet.connection
 	 */
 	public class P2PClient extends ClientBase
 	{
-		/** 연결 검사용 타이머 */
+		/** Timer for to check connection */
 		private var _timer:Timer;
 		
-		/** 최대 연결 지연 한계 **/
+		/** Connection delay limit(ms) **/
 		private var _connectionDelayLimit:Number;
 		
 		private var _url:String;
@@ -107,15 +107,15 @@ package gogduNet.connection
 		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체 */
 		private var _socketSecurity:SocketSecurity;
 		
-		/** <p>url : 접속할 주소(rtmfp)</p>
-		 * <p>netGroupName : NetGroup 이름</p>
-		 * <p>socketSecurity : 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체.<p/>
-		 * 값이 null인 경우 자동으로 생성(new SocketSecurity(false))</p>
-		 * <p>timerInterval : 타이머 간격(ms)<p/>
-		 * (P2PClient의 timer는 정보 수신을 겸하지 않고 오로지 연결 검사용으로만 쓰이기 때문에 반복 속도(timerInterval)가 조금
-		 * 느려도 괜찮습니다.)</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
-		 * (여기서 설정한 시간 동안 특정 피어로부터 데이터가 오지 않으면 그 피어와 연결이 끊긴 것으로 간주한다.)</p>
+		/** <p>url : Access address(rtmfp)</p>
+		 * <p>netGroupName : NetGroup name</p>
+		 * <p>socketSecurity : SocketSecurity type object which has list of Permitted or Unpermitted connection.<p/>
+		 * If value is null, generated automatically.(new SocketSecurity(false))</p>
+		 * <p>timerInterval : Delay of Timer for to check connection.(ms)<p/>
+		 * (Timer delay of P2PClient's timer is a little slow does not matter
+		 * because use only check connection not double as to receive data)</p>
+		 * <p>connectionDelayLimit : Connection delay limit(ms)<p/>
+		 * (If data does not come from what peer for the time set here, consider disconnected with one.)</p>
 		 */
 		public function P2PClient(url:String, netGroupName:String="GogduNet", socketSecurity:SocketSecurity=null, timerInterval:Number=1000, connectionDelayLimit:Number=10000)
 		{
@@ -152,7 +152,7 @@ package gogduNet.connection
 			_socketSecurity = socketSecurity;
 		}
 		
-		/** 연결할 url 값을 가져오거나 설정한다. 설정은 연결하고 있지 않을 때에만 할 수 있다. */
+		/** Get or set access address. Can be set only if not connected. */
 		public function get url():String
 		{
 			return _url;
@@ -167,7 +167,7 @@ package gogduNet.connection
 			_url = value;
 		}
 		
-		/** 연결할 넷 그룹의 이름을 가져오거나 설정한다. 설정은 연결하고 있지 않을 때에만 할 수 있다. */
+		/** Get or set name of Netgroup to connect. Can be set only if not connected. */
 		public function get netGroupName():String
 		{
 			return _netGroupName;
@@ -182,9 +182,10 @@ package gogduNet.connection
 			_netGroupName = value;
 		}
 		
-		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 객체를 가져오거나 설정한다.
-		 * (P2PClient에서만 특수하게, SocketSecurity.addSocket() 함수의 address 인자를 peerID로, 
-		 * port 인자를 음수로 설정해야 합니다.)
+		/** Get or set SocketSecurity type object which has list of Permitted or Unpermitted connection.<p/>
+		 * (Special case in P2PClient,
+		 * address argument of SocketSecurity.addSocket() is must be set to peerID
+		 * and port argument is must be set to negative number.)
 		 */
 		public function get socketSecurity():SocketSecurity
 		{
@@ -195,7 +196,7 @@ package gogduNet.connection
 			_socketSecurity = value;
 		}
 		
-		/** 연결 검사용 타이머의 재생 간격을 가져오거나 설정한다.(ms) */
+		/** Get or set delay of Timer for to check connection.(ms) */
 		public function get timerInterval():Number
 		{
 			return _timer.delay;
@@ -205,8 +206,8 @@ package gogduNet.connection
 			_timer.delay = value;
 		}
 		
-		/** 연결 지연 한계를 가져오거나 설정한다. (ms)
-		 * 이 시간을 넘도록 정보가 수신되지 않은 경우엔 연결이 끊긴 것으로 간주하고 이쪽에서도 연결을 끊는다.
+		/** Get or set connection delay limit.<p/>
+		 * (If data does not come from what peer for the time set here, consider disconnected with one.)
 		 */
 		public function get connectionDelayLimit():Number
 		{
@@ -217,7 +218,7 @@ package gogduNet.connection
 			_connectionDelayLimit = value;
 		}
 		
-		/** 나 자신의 peer id를 가져온다. */
+		/** Get my peerID */
 		public function get peerID():String
 		{
 			/*if(_isConnected == false)
@@ -228,25 +229,25 @@ package gogduNet.connection
 			return _netConnection.nearID;
 		}
 		
-		/** 연결되어 있는가를 나타내는 여부를 가져온다. */
+		/** Get whether currently connected */
 		public function get isConnected():Boolean
 		{
 			return _isConnected;
 		}
 		
-		/** 디버그용 기록을 가진 RecordConsole 객체를 가져온다. */
+		/** Get RecordConsole Object which has record for debug */
 		public function get record():RecordConsole
 		{
 			return _record;
 		}
 		
-		/** 피어 객체용 오브젝트 풀을 가져온다. */
+		/** Get object pool for P2PPeer objects */
 		public function get peerPool():ObjectPool
 		{
 			return _peerPool;
 		}
 		
-		/** 연결된 후 시간이 얼마나 지났는지를 나타내는 값을 가져온다.(ms) */
+		/** Get elapsed time after connected.(ms) */
 		public function get elapsedTimeAfterConnected():Number
 		{
 			if(_isConnected == false)
@@ -257,21 +258,23 @@ package gogduNet.connection
 			return getTimer() - _connectedTime;
 		}
 		
-		/** 마지막으로 연결된 시각으로부터 지난 시간을 가져온다.(ms) */
+		/** Get elapsed time after last received.(ms) */
 		public function get elapsedTimeAfterLastReceived():Number
 		{
 			return getTimer() - _lastReceivedTime;
 		}
 		
-		/** 연결되어 있는 peer의 수를 가져온다.(넷 그룹의 '모든' peer가 아니라 '나와 연결된' peer의 수.)
-		 * 단순히 연결한 피어의 수이므로, 수에 포함되어 있는 모든 피어와의 연결이 안정되어 있는 것은 아니다. */
+		/** Get the number of connected peers. (Not all peers in NetGroup but peers which connected with me)<p/>
+		 * Because simply the number of peers,
+		 * may connection of part or all of peers which this number contains is not stable.
+		 */
 		public function get numPeers():uint
 		{
 			return _peerArray.length;
 		}
 		
-		/** 마지막으로 연결된 시각을 갱신한다.
-		 * (정보를 수신한 경우 자동으로 이 함수가 실행되어 갱신된다.)
+		/** Update last received time.
+		 * (Automatically updates by execute this function when received data)
 		 */
 		private function updateLastReceivedTime():void
 		{
@@ -279,7 +282,7 @@ package gogduNet.connection
 			dispatchEvent(_event);
 		}
 		
-		/** P2P 연결을 시도한다. */
+		/** Tries to P2P connect. */
 		public function connect():void
 		{
 			if(!_url || _isConnected == true)
@@ -291,7 +294,7 @@ package gogduNet.connection
 			_netConnection.connect(_url);
 		}
 		
-		/** P2P 연결을 끊는다. */
+		/** Close P2P connection. */
 		public function close():void
 		{
 			if(_isConnected == false)

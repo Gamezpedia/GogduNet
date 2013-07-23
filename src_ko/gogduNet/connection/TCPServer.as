@@ -11,30 +11,32 @@ package gogduNet.connection
 	import flash.utils.getTimer;
 	import flash.utils.setTimeout;
 	
+	import gogduNet.utils.DataType;
 	import gogduNet.connection.TCPSocket;
 	import gogduNet.events.DataEvent;
 	import gogduNet.events.GogduNetEvent;
-	import gogduNet.utils.DataType;
 	import gogduNet.utils.Encryptor;
 	import gogduNet.utils.ObjectPool;
 	import gogduNet.utils.RecordConsole;
 	import gogduNet.utils.SocketSecurity;
 	import gogduNet.utils.makePacket;
 	import gogduNet.utils.parsePacket;
+	import gogduNet.utils.DataType;
 	
 	/** 허용되지 않은 대상이 연결을 시도하면 발생한다.
 	 * <p/>( data:{address:대상의 address, port:대상의 포트} )
 	 */
 	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
 	/** 운영체제 등에 의해 비자발적으로 서버가 닫힌 경우 발생<p/>
-	 * (close() 함수로는 발생하지 않는다)
+	 * (close() 함수로는 발생하지 않는다.)
 	 */
 	[Event(name="close", type="gogduNet.events.GogduNetEvent")]
 	/** 어떤 소켓이 성공적으로 접속한 경우 발생
 	 * <p/>(data:소켓의 id)
 	 */
 	[Event(name="socketConnect", type="gogduNet.events.GogduNetEvent")]
-	/** 어떤 소켓의 연결 시도가 서버 최대 인원 초과로 인해 실패한 경우에 발생한다.
+	/** 어떤 소켓의 연결 시도가 서버 최대 인원 초과로 인해 실패한 경우에 발생한다.<p/>
+	 * 연결 실패한 소켓은 바로 끊기지 않으며, 실패했음을 알리는 패킷을 전송한 후 잠깐의 시간 뒤에 자동으로 끊는다.
 	 * <p/>( data:{address:실패한 소켓의 address, port:실패한 소켓의 포트} )
 	 */
 	[Event(name="socketConnectFail", type="gogduNet.events.GogduNetEvent")]
@@ -44,32 +46,23 @@ package gogduNet.connection
 	 * <p/>( data:{id:끊긴 소켓의 id, address:끊긴 소켓의 address, port:끊긴 소켓의 포트} )
 	 */
 	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
-	/** 정상적인 데이터를 완전히 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
-	 * <p/>(id:데이터를 보낸 소켓의 id, dataType:DataType.BYTES, dataDefinition, data)
+	/** 정상적인 데이터를 수신했을 때 발생. 데이터는 가공되어 이벤트로 전달된다.
+	 * <p/>(id:데이터를 보낸 소켓의 id, dataType, dataDefinition, data)
 	 */
 	[Event(name="receiveData", type="gogduNet.events.DataEvent")]
-	/** 데이터를 전송 받는 중일 때 발생. 지금까지 전송 받은 데이터가 이벤트로 전달된다.<p/>
-	 * (dataDefinition 속성이 존재하면 사용자가 보낸 (헤더와 프로토콜을 제외한)실질적인 데이터의 전송 상태를
-	 * data 속성으로 전달하며, dataDefinition 속성이 존재하지 않으면(null)
-	 * 아직 헤더나 프로토콜이 다 전송되지 않은 걸 의미하며, 헤더와 프로토콜이 포함된 바이트 배열이 전달된다)<p/>
-	 * (데이터의 크기가 적어 너무 빨리 다 받은 경우엔 이 이벤트가 발생하지 않을 수도 있다.)
-	 * <p/>(id:데이터를 보낸 소켓의 id, dataType:DataType.BYTES, dataDefinition:null or String, data:null or ByteArray)
+	/** 정상적이지 않은 데이터를 수신했을 때 발생
+	 * <p/>(id:데이터를 보낸 피어의 id, dataType:DataType.INVALID, dataDefinition:"Wrong" or "Surplus", data:잘못된 패킷의 ByteArray)
 	 */
-	[Event(name="progressData", type="gogduNet.events.DataEvent")]
+	[Event(name="invalidPacket", type="gogduNet.events.DataEvent")]
 	
-	/** 2진 파일 전송용 TCP 서버입니다.<p/>
-	 * 한 번에 최대 4기가의 데이터를 전송할 수 있으며, 수신 진행 상황을
-	 * 이벤트로 알려주므로 파일 전송용으로 사용하기 좋습니다.<p/>
-	 * 주의할 점으로 전송할 데이터의 크기(용량)이 큰 경우, TCP의 특성상 하나의 연결(하나의 TCPBinaryClient 객체)에선
-	 * 한 번에 하나의 데이터만 전송하는 것이 좋습니다.<p/>
-	 * (이전의 데이터가 모두 전송되기 전에 다른 데이터를 다시 전송하지 마세요)<p/>
+	/** JSON 문자열을 기반으로 하여 통신하는 TCP 서버<p/>
 	 * (네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)
 	 * 
 	 * @langversion 3.0
 	 * @playerversion AIR 3.0 Desktop
 	 * @playerversion AIR 3.8
 	 */
-	public class TCPBinaryServer extends ClientBase
+	public class TCPServer extends ClientBase
 	{
 		/** 내부적으로 정보 수신과 연결 검사용으로 사용하는 타이머 */
 		private var _timer:Timer;
@@ -117,10 +110,10 @@ package gogduNet.connection
 		 * <p>timerInterval : 정보 수신과 연결 검사를 할 때 사용할 타이머의 반복 간격(ms)</p>
 		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
 		 * (여기서 설정한 시간 동안 소켓으로부터 데이터가 오지 않으면 그 소켓과는 연결이 끊긴 것으로 간주한다.)</p>
-		 * <p>encoding : 프로토콜 문자열의 변환에 사용할 인코딩 형식</p>
+		 * <p>encoding : 통신을 할 때 사용할 인코딩 형식</p>
 		 */
-		public function TCPBinaryServer(serverAddress:String="0.0.0.0", serverPort:int=0, maxSockets:int=10, socketSecurity:SocketSecurity=null, timerInterval:Number=100,
-										connectionDelayLimit:Number=10000, encoding:String="UTF-8")
+		public function TCPServer(serverAddress:String="0.0.0.0", serverPort:int=0, maxSockets:int=10, socketSecurity:SocketSecurity=null, timerInterval:Number=100,
+								  connectionDelayLimit:Number=10000, encoding:String="UTF-8")
 		{
 			_timer = new Timer(timerInterval);
 			_connectionDelayLimit = connectionDelayLimit;
@@ -237,7 +230,7 @@ package gogduNet.connection
 			_maxSockets = value;
 		}
 		
-		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 객체를 가져오거나 설정한다. */
+		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체를 가져오거나 설정한다. */
 		public function get socketSecurity():SocketSecurity
 		{
 			return _socketSecurity;
@@ -293,7 +286,7 @@ package gogduNet.connection
 			dispatchEvent(_event);
 		}
 		
-		/** 특정 address를 가진 소켓을 가져온다.(같은 address를 가진 소켓이 여러 개 존재할 수도 있다) */
+		/** address가 일치하는 소켓을 가져온다.(같은 address를 가진 소켓이 여러 개 존재할 수도 있다) */
 		public function getSocketByAddress(address:String):TCPSocket
 		{
 			var i:int;
@@ -320,7 +313,7 @@ package gogduNet.connection
 			return null;
 		}
 		
-		/** 특정 포트를 가진 소켓을 가져온다.(같은 포트를 가진 소켓이 여러 개 존재할 수도 있다) */
+		/** 포트가 일치하는 소켓을 가져온다.(같은 포트를 가진 소켓이 여러 개 존재할 수도 있다) */
 		public function getSocketByPort(port:int):TCPSocket
 		{
 			var i:int;
@@ -374,7 +367,7 @@ package gogduNet.connection
 			return null;
 		}
 		
-		/** id가 일치하는 소켓을 가져온다.(유일하다) */
+		/** id로 소켓을 가져온다.(유일하다) */
 		public function getSocketByID(id:String):TCPSocket
 		{
 			if(_idTable[id] && _idTable[id] is TCPSocket)
@@ -627,104 +620,473 @@ package gogduNet.connection
 			_run = false;
 		}
 		
-		/** 플래시의 네이티브 소켓으로 2진 데이터를 전송한다.
-		 * 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
-		 * 신경 쓸 필요는 없다. 그리고 definition(프로토콜 문자열)은 암호화되어 전송되고, 받았을 때 복호화되어 이벤트로 넘겨진다. 이
-		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)
-		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<p/>
-		 * ( 한 번에 전송할 수 있는 data의 최대 길이는 uint로 표현할 수 있는 최대값인 4294967295(=4GB)이며,
-		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )<p/>
-		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.)<p/>
-		 * 패킷 형식이 맞지 않거나 연결되어 있지 않는 등의 이유로 전송이 실패한 경우엔 false를, 그 외엔 true를 반환한다.
+		/** 플래시의 네이티브 소켓으로 Definition를 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않다는 등의 이유로 전송이 실패한 경우 true를, 그 외엔 false를 반환한다.
 		 */
-		public function sendBytesToNativeSocket(nativeSocket:Socket, definition:String, data:ByteArray=null):Boolean
+		public function sendDefinitionToNativeSocket(nativeSocket:Socket, definition:String):Boolean
 		{
 			if(_run == false){return false;}
 			
-			//패킷 생성
-			var packet:ByteArray = new ByteArray();
-			//(프로토콜 문자열은 암호화되어 전송된다.)
-			var defBytes:ByteArray = new ByteArray();
-			defBytes.writeMultiByte( Encryptor.encode(definition), _encoding );
+			var str:String = makePacket(DataType.DEFINITION, definition);
+			if(str == null){return false;}
 			
-			//data가 존재할 경우
-			if(data)
-			{
-				//헤더 생성
-				packet.writeUnsignedInt( data.length ); //data size
-				packet.writeUnsignedInt( defBytes.length ); //protocol length
-				packet.writeBytes(defBytes, 0, defBytes.length); //protocol
-				packet.writeBytes(data, 0, data.length); //data
-			}
-			
-			//data가 null일 경우
-			if(!data)
-			{
-				//헤더 생성
-				packet.writeUnsignedInt( 0 ); //data size
-				packet.writeUnsignedInt( defBytes.length ); //protocol length
-				packet.writeBytes(defBytes, 0, defBytes.length); //protocol
-			}
-			
-			nativeSocket.writeBytes( packet, 0, packet.length );
+			nativeSocket.writeMultiByte(str, _encoding);
 			nativeSocket.flush();
 			return true;
 		}
 		
-		/** 특정 id를 가진 소켓을 찾아 그 소켓에게 2진 데이터를 전송한다.
-		 * 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
-		 * 신경 쓸 필요는 없다. 그리고 definition(프로토콜 문자열)은 암호화되어 전송되고, 받았을 때 복호화되어 이벤트로 넘겨진다. 이
-		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)
-		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<p/>
-		 * ( 한 번에 전송할 수 있는 data의 최대 길이는 uint로 표현할 수 있는 최대값인 4294967295(=4GB)이며,
-		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )<p/>
-		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.)
-		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이 실패한 경우엔 false를,
-		 * 그 외엔 true를 반환한다.
+		/** 플래시의 네이티브 소켓으로 String를 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않다는 등의 이유로 전송이 실패한 경우 true를, 그 외엔 false를 반환한다.
 		 */
-		public function sendBytes(id:String, definition:String, data:ByteArray=null):Boolean
+		public function sendStringToNativeSocket(nativeSocket:Socket, definition:String, data:String):Boolean
 		{
+			if(_run == false){return false;}
+			
+			var str:String = makePacket(DataType.STRING, definition, data);
+			if(str == null){return false;}
+			
+			nativeSocket.writeMultiByte(str, _encoding);
+			nativeSocket.flush();
+			return true;
+		}
+		
+		/** 플래시의 네이티브 소켓으로 Array를 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않다는 등의 이유로 전송이 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendArrayToNativeSocket(nativeSocket:Socket, definition:String, data:Array):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var str:String = makePacket(DataType.ARRAY, definition, data);
+			if(str == null){return false;}
+			
+			nativeSocket.writeMultiByte(str, _encoding);
+			nativeSocket.flush();
+			return true;
+		}
+		
+		/** 플래시의 네이티브 소켓으로 Integer를 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않다는 등의 이유로 전송이 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendIntegerToNativeSocket(nativeSocket:Socket, definition:String, data:int):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var str:String = makePacket(DataType.INTEGER, definition, data);
+			if(str == null){return false;}
+			
+			nativeSocket.writeMultiByte(str, _encoding);
+			nativeSocket.flush();
+			return true;
+		}
+		
+		/** 플래시의 네이티브 소켓으로 Unsigned Integer를 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않다는 등의 이유로 전송이 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendUnsignedIntegerToNativeSocket(nativeSocket:Socket, definition:String, data:uint):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var str:String = makePacket(DataType.UNSIGNED_INTEGER, definition, data);
+			if(str == null){return false;}
+			
+			nativeSocket.writeMultiByte(str, _encoding);
+			nativeSocket.flush();
+			return true;
+		}
+		
+		/** 플래시의 네이티브 소켓으로 Rationals를 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않다는 등의 이유로 전송이 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendRationalsToNativeSocket(nativeSocket:Socket, definition:String, data:Number):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var str:String = makePacket(DataType.RATIONALS, definition, data);
+			if(str == null){return false;}
+			
+			nativeSocket.writeMultiByte(str, _encoding);
+			nativeSocket.flush();
+			return true;
+		}
+		
+		/** 플래시의 네이티브 소켓으로 Boolean를 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않다는 등의 이유로 전송이 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendBooleanToNativeSocket(nativeSocket:Socket, definition:String, data:Boolean):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var str:String = makePacket(DataType.BOOLEAN, definition, data);
+			if(str == null){return false;}
+			
+			nativeSocket.writeMultiByte(str, _encoding);
+			nativeSocket.flush();
+			return true;
+		}
+		
+		/** 플래시의 네이티브 소켓으로 JSON를 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않다는 등의 이유로 전송이 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 * (data 인자엔 Object 타입 객체나, JSON 형식에 맞는 String 객체가 올 수 있다.)
+		 */
+		public function sendJSONToNativeSocket(nativeSocket:Socket, definition:String, data:Object):Boolean
+		{
+			if(_run == false){return false;}
+			
+			if(data is String)
+			{
+				try
+				{
+					data = JSON.parse(String(data));
+				}
+				catch(e:Error)
+				{
+					return false;
+				}
+			}
+			
+			var str:String = makePacket(DataType.JSON, definition, data);
+			if(str == null){return false;}
+			
+			nativeSocket.writeMultiByte(str, _encoding);
+			nativeSocket.flush();
+			return true;
+		}
+		
+		/** id가 일치하는 소켓에게 Definition을 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이
+		 * 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendDefinition(id:String, definition:String):Boolean
+		{
+			if(_run == false){return false;}
+			
 			var socket:TCPSocket = getSocketByID(id);
 			if(socket == null){return false;}
 			
-			return sendBytesToNativeSocket(socket.nativeSocket, definition, data);
+			return sendDefinitionToNativeSocket(socket.nativeSocket, definition);
 		}
 		
-		/** 연결되어 있는 모든 소켓에게 2진 데이터를 전송한다.
-		 * 함수 내부에서 자동으로 데이터에 헤더를 붙이지만, 이벤트로 데이터를 넘길 때 헤더가 자동으로 제거되므로
-		 * 신경 쓸 필요는 없다. 그리고 definition(프로토콜 문자열)은 암호화되어 전송되고, 받았을 때 복호화되어 이벤트로 넘겨진다. 이
-		 * 역시 클래스 내부에서 자동으로 처리되므로 신경 쓸 필요는 없다.(Encryptor 클래스를 수정하여 암호화 부분 수정 가능)
-		 * 단, 데이터 부분은 자동으로 암호화되지 않으므로 직접 암호화 처리를 해야 한다.<p/>
-		 * ( 한 번에 전송할 수 있는 data의 최대 길이는 uint로 표현할 수 있는 최대값인 4294967295(=4GB)이며,
-		 * definition 문자열의 최대 길이도 uint로 표현할 수 있는 최대값인 4294967295이다. )<p/>
-		 * (data 인자에 null을 넣으면, data는 길이가 0으로 전송된다.)
-		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 하나의 소켓이라도 전송이
-		 * 실패한 경우엔 false를, 그 외엔 true를 반환한다.
+		/** id가 일치하는 소켓에게 String을 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이
+		 * 실패한 경우 true를, 그 외엔 false를 반환한다.
 		 */
-		public function sendBytesToAll(definition:String, data:ByteArray=null):Boolean
+		public function sendString(id:String, definition:String, data:String):Boolean
 		{
-			if(_run == false)
+			if(_run == false){return false;}
+			
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return false;}
+			
+			return sendStringToNativeSocket(socket.nativeSocket, definition, data);
+		}
+		
+		/** id가 일치하는 소켓에게 Array을 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이
+		 * 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendArray(id:String, definition:String, data:Array):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return false;}
+			
+			return sendArrayToNativeSocket(socket.nativeSocket, definition, data);
+		}
+		
+		/** id가 일치하는 소켓에게 Integer을 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이
+		 * 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendInteger(id:String, definition:String, data:int):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return false;}
+			
+			return sendIntegerToNativeSocket(socket.nativeSocket, definition, data);
+		}
+		
+		/** id가 일치하는 소켓에게 Unsigned Integer을 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이
+		 * 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendUnsignedInteger(id:String, definition:String, data:uint):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return false;}
+			
+			return sendUnsignedIntegerToNativeSocket(socket.nativeSocket, definition, data);
+		}
+		
+		/** id가 일치하는 소켓에게 Rationals을 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이
+		 * 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendRationals(id:String, definition:String, data:Number):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return false;}
+			
+			return sendRationalsToNativeSocket(socket.nativeSocket, definition, data);
+		}
+		
+		/** id가 일치하는 소켓에게 Boolean을 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이
+		 * 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 */
+		public function sendBoolean(id:String, definition:String, data:Boolean):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return false;}
+			
+			return sendBooleanToNativeSocket(socket.nativeSocket, definition, data);
+		}
+		
+		/** id가 일치하는 소켓에게 JSON을 전송한다.
+		 * 패킷 형식이 맞지 않거나 연결되어 있지 않거나 id가 일치하는 소켓이 없다는 등의 이유로 전송이
+		 * 실패한 경우 true를, 그 외엔 false를 반환한다.
+		 * (data 인자엔 Object 타입 객체나, JSON 형식에 맞는 String 객체가 올 수 있다.)
+		 */
+		public function sendJSON(id:String, definition:String, data:Object):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var socket:TCPSocket = getSocketByID(id);
+			if(socket == null){return false;}
+			
+			if(data is String)
 			{
-				return false;
+				try
+				{
+					data = JSON.parse(String(data));
+				}
+				catch(e:Error)
+				{
+					return false;
+				}
 			}
 			
-			var i:uint;
+			return sendJSONToNativeSocket(socket.nativeSocket, definition, data);
+		}
+		
+		/** 연결되어 있는 모든 소켓에게 sendDefinition. 하나의 소켓이라도 전송에 실패(패킷 형식에 맞지 않는 등의 이유로)한 경우엔
+		 * false를, 그 외엔 true를 반환한다.
+		 */
+		public function sendDefinitionToAll(definition:String):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var i:int;
 			var socket:TCPSocket;
 			var tf:Boolean = true;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
 			{
-				if(_socketArray[i] == null)
-				{
-					continue;
-				}
-				socket = _socketArray[i];
-				if(socket.isConnected == false)
-				{
-					continue;
-				}
+				if(_socketArray[i] == null){continue;}
 				
-				if(sendBytes(socket.id, definition, data) == false)
+				socket = _socketArray[i];
+				if(socket.isConnected == false){continue;}
+				
+				if(sendDefinition(socket.id, definition) == false)
+				{
+					tf = false;
+				}
+			}
+			
+			return tf;
+		}
+		
+		/** 연결되어 있는 모든 소켓에게 sendString. 하나의 소켓이라도 전송에 실패(패킷 형식에 맞지 않는 등의 이유로)한 경우엔
+		 * false를, 그 외엔 true를 반환한다.
+		 */
+		public function sendStringToAll(definition:String, data:String):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var i:int;
+			var socket:TCPSocket;
+			var tf:Boolean = true;
+			
+			for(i = 0; i < _socketArray.length; i += 1)
+			{
+				if(_socketArray[i] == null){continue;}
+				
+				socket = _socketArray[i];
+				if(socket.isConnected == false){continue;}
+				
+				if(sendString(socket.id, definition, data) == false)
+				{
+					tf = false;
+				}
+			}
+			
+			return tf;
+		}
+		
+		/** 연결되어 있는 모든 소켓에게 sendArray. 하나의 소켓이라도 전송에 실패(패킷 형식에 맞지 않는 등의 이유로)한 경우엔
+		 * false를, 그 외엔 true를 반환한다.
+		 */
+		public function sendArrayToAll(definition:String, data:Array):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var i:int;
+			var socket:TCPSocket;
+			var tf:Boolean = true;
+			
+			for(i = 0; i < _socketArray.length; i += 1)
+			{
+				if(_socketArray[i] == null){continue;}
+				
+				socket = _socketArray[i];
+				if(socket.isConnected == false){continue;}
+				
+				if(sendArray(socket.id, definition, data) == false)
+				{
+					tf = false;
+				}
+			}
+			
+			return tf;
+		}
+		
+		/** 연결되어 있는 모든 소켓에게 sendInteger. 하나의 소켓이라도 전송에 실패(패킷 형식에 맞지 않는 등의 이유로)한 경우엔
+		 * false를, 그 외엔 true를 반환한다.
+		 */
+		public function sendIntegerToAll(definition:String, data:int):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var i:int;
+			var socket:TCPSocket;
+			var tf:Boolean = true;
+			
+			for(i = 0; i < _socketArray.length; i += 1)
+			{
+				if(_socketArray[i] == null){continue;}
+				
+				socket = _socketArray[i];
+				if(socket.isConnected == false){continue;}
+				
+				if(sendInteger(socket.id, definition, data) == false)
+				{
+					tf = false;
+				}
+			}
+			
+			return tf;
+		}
+		
+		/** 연결되어 있는 모든 소켓에게 sendUnsignedInteger. 하나의 소켓이라도 전송에 실패(패킷 형식에 맞지 않는 등의 이유로)한 경우엔
+		 * false를, 그 외엔 true를 반환한다.
+		 */
+		public function sendUnsignedIntegerToAll(definition:String, data:uint):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var i:int;
+			var socket:TCPSocket;
+			var tf:Boolean = true;
+			
+			for(i = 0; i < _socketArray.length; i += 1)
+			{
+				if(_socketArray[i] == null){continue;}
+				
+				socket = _socketArray[i];
+				if(socket.isConnected == false){continue;}
+				
+				if(sendUnsignedInteger(socket.id, definition, data) == false)
+				{
+					tf = false;
+				}
+			}
+			
+			return tf;
+		}
+		
+		/** 연결되어 있는 모든 소켓에게 sendRationals. 하나의 소켓이라도 전송에 실패(패킷 형식에 맞지 않는 등의 이유로)한 경우엔
+		 * false를, 그 외엔 true를 반환한다.
+		 */
+		public function sendRationalsToAll(definition:String, data:Number):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var i:int;
+			var socket:TCPSocket;
+			var tf:Boolean = true;
+			
+			for(i = 0; i < _socketArray.length; i += 1)
+			{
+				if(_socketArray[i] == null){continue;}
+				
+				socket = _socketArray[i];
+				if(socket.isConnected == false){continue;}
+				
+				if(sendRationals(socket.id, definition, data) == false)
+				{
+					tf = false;
+				}
+			}
+			
+			return tf;
+		}
+		
+		/** 연결되어 있는 모든 소켓에게 sendBoolean. 하나의 소켓이라도 전송에 실패(패킷 형식에 맞지 않는 등의 이유로)한 경우엔
+		 * false를, 그 외엔 true를 반환한다.
+		 */
+		public function sendBooleanToAll(definition:String, data:Boolean):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var i:int;
+			var socket:TCPSocket;
+			var tf:Boolean = true;
+			
+			for(i = 0; i < _socketArray.length; i += 1)
+			{
+				if(_socketArray[i] == null){continue;}
+				
+				socket = _socketArray[i];
+				if(socket.isConnected == false){continue;}
+				
+				if(sendBoolean(socket.id, definition, data) == false)
+				{
+					tf = false;
+				}
+			}
+			
+			return tf;
+		}
+		
+		/** 연결되어 있는 모든 소켓에게 sendJSON. 하나의 소켓이라도 전송에 실패(패킷 형식에 맞지 않는 등의 이유로)한 경우엔
+		 * false를, 그 외엔 true를 반환한다.
+		 * (data 인자엔 Object 타입 객체나, JSON 형식에 맞는 String 객체가 올 수 있다.)
+		 */
+		public function sendJSONToAll(definition:String, data:Object):Boolean
+		{
+			if(_run == false){return false;}
+			
+			var i:int;
+			var socket:TCPSocket;
+			var tf:Boolean = true;
+			
+			for(i = 0; i < _socketArray.length; i += 1)
+			{
+				if(_socketArray[i] == null){continue;}
+				
+				socket = _socketArray[i];
+				if(socket.isConnected == false){continue;}
+				
+				if(sendJSON(socket.id, definition, data) == false)
 				{
 					tf = false;
 				}
@@ -812,7 +1174,7 @@ package gogduNet.connection
 			if(numSockets >= _maxSockets && _maxSockets >= 0)
 			{
 				_record.addRecord(true, "What socket is failed connect(Saturation)(address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")");
-				sendBytesToNativeSocket(socket, "Connect.Fail.Saturation", null);
+				sendDefinitionToNativeSocket(socket, "Connect.Fail.Saturation");
 				setTimeout(_forcedCloseNativeSocket, 100, socket);
 				
 				dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CONNECT_FAIL, false, false, {address:socket.remoteAddress, port:socket.remotePort}) );
@@ -829,7 +1191,7 @@ package gogduNet.connection
 			socket2.updateLastReceivedTime();
 			_socketArray.push(socket2);
 			
-			sendBytesToNativeSocket(socket, "Connect.Success", null); // socket == socket2.nativeSocket
+			sendDefinitionToNativeSocket(socket, "Connect.Success"); // socket == socket2.nativeSocket
 			
 			_record.addRecord(true, "Client connected(id:" + socket2.id + ", address:" + socket.remoteAddress + ", port:" + socket.remotePort + ")");
 			
@@ -879,10 +1241,8 @@ package gogduNet.connection
 			if(socket.elapsedTimeAfterLastReceived > _connectionDelayLimit)
 			{
 				_record.addRecord(true, "Disconnects connection to client(NoResponding)(id:" + id + ", address:" + socket.address + ", port:" + socket.port + ")");
-				sendBytes(id, "GogduNet.Disconnect.NoResponding", null);
-				
-				dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, {id:id, address:socket.address, port:socket.port}) );
-				
+				sendDefinition(id, "GogduNet.Disconnect.NoResponding");
+				dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, {id:socket.id, address:socket.address, port:socket.port}) );
 				closeSocket(id);
 				return true;
 			}
@@ -896,14 +1256,11 @@ package gogduNet.connection
 			var socket:TCPSocket;
 			var socketInSocket:Socket;
 			var packetBytes:ByteArray; // 패킷을 읽을 때 쓰는 바이트 배열.
-			var bytes:ByteArray; // 패킷을 읽을 때 보조용으로 쓰는 바이트 배열.
-			
-			var size:uint; //헤더에서 뽑아낸 파일의 최종 크기
-			var protocolLength:uint; //헤더에서 뽑아낸 프로토콜 문자열의 길이
-			var protocol:String; //프로토콜 문자열
-			var data:ByteArray; //최종 데이터
-			
-			var i:uint;
+			var bytes:ByteArray; // 패킷을 읽을 때 보조용으로 한 번만 쓰는 일회용 바이트 배열.
+			var regArray:Array; // 정규 표현식으로 찾은 문자열들을 저장해 두는 배열
+			var jsonObj:Object // 문자열을 JSON으로 변환할 때 사용하는 객체
+			var packetStr:String; // byte을 String으로 변환하여 읽을 때 쓰는 문자열.
+			var i:int;
 			
 			for each(socket in _socketArray)
 			{
@@ -924,12 +1281,12 @@ package gogduNet.connection
 					continue;
 				}
 				
-				
 				// 서버의 마지막 연결 시각을 갱신.
 				updateLastReceivedTime();
 				// 해당 소켓과의 마지막 연결 시각을 갱신.
 				socket.updateLastReceivedTime();
 				
+				// packetBytes는 socket.packetBytes + socketInSocket의 값을 가지게 된다.
 				packetBytes = new ByteArray();
 				bytes = socket._backupBytes;
 				bytes.position = 0;
@@ -939,123 +1296,80 @@ package gogduNet.connection
 				//만약 AS가 아닌 C# 등과 통신할 경우 엔디안이 다르므로 오류가 날 수 있다. 그걸 방지하기 위함.
 				socketInSocket.endian = Endian.LITTLE_ENDIAN;
 				socketInSocket.readBytes(packetBytes, packetBytes.length, socketInSocket.bytesAvailable);
+				
 				bytes.length = 0; //bytes == socket._backupBytes
 				
-				//헤더가 다 전송되지 않은 경우
-				if(packetBytes.length < 8)
+				// 정보(byte)를 String으로 읽는다.
+				try
 				{
 					packetBytes.position = 0;
-					dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
-						socket.id, DataType.BYTES, null, packetBytes) );
+					packetStr = packetBytes.readMultiByte(packetBytes.length, _encoding);
 				}
-				//패킷 바이트의 길이가 8 이상일 경우(즉, 크기 헤더와 프로토콜 문자열 길이 헤더가 있는 경우), 반복
-				while(packetBytes.length >= 8)
+				catch(e:Error)
 				{
-					try
+					_record.addErrorRecord(true, e, "It occurred from packet bytes convert to string");
+					continue;
+				}
+				
+				// 필요 없는 잉여 패킷(잘못 전달되었거나 악성 패킷)이 있으면 제거한다.
+				if(FILTER_REG_EXP.test(packetStr) == true)
+				{
+					_record.addRecord(true, "Sensed surplus packets(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + socket.id + ", address:" + socket.address + ", port:" + socket.port + ")(str:" + packetStr + ")");
+					_record.addByteRecord(true, packetBytes);
+					dispatchEvent(new DataEvent(DataEvent.INVALID_PACKET, false, false, socket.id, DataType.INVALID, "Surplus", packetBytes));
+					packetStr.replace(FILTER_REG_EXP, "");
+				}
+				
+				//_reg:정규표현식 에 매치되는 패킷을 가져온다.
+				regArray = packetStr.match(EXTRACTION_REG_EXP);
+				//가져온 패킷을 문자열에서 제거한다.
+				packetStr = packetStr.replace(EXTRACTION_REG_EXP, "");
+				
+				for(i = 0; i < regArray.length; i += 1)
+				{
+					if(!regArray[i])
 					{
-						packetBytes.position = 0;
-						
-						//헤더(크기 헤더)를 읽는다.
-						size = packetBytes.readUnsignedInt(); //Unsigned Int : 4 byte
-						
-						//헤더(프로토콜 문자열 길이 헤더)를 읽는다.
-						protocolLength = packetBytes.readUnsignedInt();
-					}
-					catch(e:Error)
-					{
-						//오류가 난 정보를 바이트 배열에서 제거
-						bytes = new ByteArray();
-						bytes.length = 0;
-						bytes.position = 0;
-						bytes.writeBytes(packetBytes, 0, packetBytes.length);
-						packetBytes.length = 0;
-						packetBytes.position = 0;
-						//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
-						packetBytes.writeBytes(bytes, 8, 0);
-						
-						_record.addErrorRecord(true, e, "It occurred from read to data's header");
-						break;
+						continue;
 					}
 					
-					//프로토콜 문자열 길이 이상만큼 전송 된 경우
-					//(bytesAvailable == length - position)
-					if(packetBytes.bytesAvailable >= protocolLength)
+					// 패킷에 오류가 있는지를 검사합니다.
+					jsonObj = parsePacket(regArray[i]);
+					
+					// 패킷에 오류가 있으면
+					if(jsonObj == null)
 					{
-						try
-						{
-							//프로토콜 문자열을 담고 있는 바이트 배열을 문자열로 변환
-							protocol = packetBytes.readMultiByte(protocolLength, _encoding);
-							//변환된 문자열을 본래 프로토콜(전송되는 프로토콜은 암호화되어 있다)로 바꾸기 위해 복호화
-							protocol = Encryptor.decode(protocol);
-						}
-						catch(e:Error)
-						{
-							//오류가 난 정보를 바이트 배열에서 제거
-							bytes = new ByteArray();
-							bytes.length = 0;
-							bytes.position = 0;
-							bytes.writeBytes(packetBytes, 0, protocolLength);
-							packetBytes.length = 0;
-							packetBytes.position = 0;
-							//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
-							packetBytes.writeBytes(bytes, protocolLength, 0);
-							
-							_record.addErrorRecord(true, e, "It occurred from protocol bytes convert to string and decode protocol string");
-							break;
-						}
-						
-						//원래 사이즈만큼 완전히 전송이 된 경우
-						//(bytesAvailable == length - position)
-						if(packetBytes.bytesAvailable >= size)
-						{
-							data = new ByteArray();
-							data.writeBytes( packetBytes, packetBytes.position, size );
-							data.position = 0;
-							
-							/*_record.addRecord(true, "Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
-								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")");*/
-							
-							dispatchEvent( new DataEvent(DataEvent.RECEIVE_DATA, false, false, 
-								socket.id, DataType.BYTES, protocol, data) );
-							
-							//사용한 정보를 바이트 배열에서 제거한다.
-							bytes = new ByteArray();
-							bytes.writeBytes(packetBytes, 0, packetBytes.length);
-							packetBytes.clear();
-							//(length 인자를 0으로 주면, offset부터 읽을 수 있는 전부를 선택한다.)
-							packetBytes.writeBytes(bytes, 8 + protocolLength + size, 0);
-						}
-							//데이터가 아직 다 전송이 안 된 경우
-						else
-						{
-							data = new ByteArray();
-							data.writeBytes( packetBytes, packetBytes.position, packetBytes.bytesAvailable );
-							data.position = 0;
-							
-							dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
-								socket.id, DataType.BYTES, protocol, data) );
-						}
+						_record.addRecord(true, "Sensed wrong packets(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + socket.id + ", address:" + socket.address + ", port:" + socket.port + ")(str:" + regArray[i] + ")");
+						dispatchEvent(new DataEvent(DataEvent.INVALID_PACKET, false, false, socket.id, DataType.INVALID, "Wrong", packetBytes));
+						continue;
 					}
-						//프로토콜 정보가 다 전송되지 않은 경우
+						// 패킷에 오류가 없으면
 					else
 					{
-						packetBytes.position = 0;
-						dispatchEvent( new DataEvent(DataEvent.PROGRESS_DATA, false, false, 
-							socket.id, DataType.BYTES, null, packetBytes) );
+						if(jsonObj.t == DataType.DEFINITION)
+						{
+							/*_record.addRecord("Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
+								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);*/
+							
+							dispatchEvent(new DataEvent(DataEvent.RECEIVE_DATA, false, false, socket.id, jsonObj.t, jsonObj.df, null));
+						}
+						else
+						{
+							/*_record.addRecord("Data received(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")(id:" + 
+								socket.id + ", address:" + socket.address + ", port:" + socket.port + ")", true);*/
+							
+							dispatchEvent(new DataEvent(DataEvent.RECEIVE_DATA, false, false, socket.id, jsonObj.t, jsonObj.df, jsonObj.dt));
+						}
 					}
 				}
 				
-				_backup(socket._backupBytes, packetBytes);
-			}
-		}
-		
-		/** 다 처리하고 난 후에도 남아 있는(패킷이 다 오지 않아 처리가 안 된) 데이터를 소켓의 _backupBytes에 임시로 저장해 둔다. */
-		private function _backup(backupBytes:ByteArray, bytes:ByteArray):void
-		{
-			if(bytes.length > 0)
-			{
-				backupBytes.clear();
-				backupBytes.writeBytes(bytes, 0, bytes.length);
+				// 다 처리하고 난 후에도 남아 있는(패킷이 다 오지 않아 처리가 안 된) 정보(byte)를 소켓의 _backupBytes에 임시로 저장해 둔다.
+				if(packetStr.length > 0)
+				{
+					bytes = socket._backupBytes;
+					bytes.length = 0;
+					bytes.position = 0;
+					bytes.writeMultiByte(packetStr, _encoding);
+				}
 			}
 		}
 	} // class

@@ -12,7 +12,9 @@ package gogduNet.connection
 	import gogduNet.utils.RecordConsole;
 	import gogduNet.utils.SocketSecurity;
 	
-	/** 허용되지 않은 대상에게서 정보가 전송되면 발생 */
+	/** This occurs when Unpermitted target tried to connect
+	 * <p/>( data:{address:Target's address, port:Target's port} )
+	 */
 	[Event(name="unpermittedConnection", type="gogduNet.events.GogduNetEvent")]
 	/** 운영체제 등에 의해 비자발적으로 연결이 끊긴 경우 발생<p/>
 	 * (close() 함수로는 발생하지 않는다.)
@@ -75,13 +77,13 @@ package gogduNet.connection
 			_socketSecurity = socketSecurity;
 		}
 		
-		/** 플래시의 네이티브 소켓을 가져온다. */
+		/** Get native server socket of flash */
 		public function get serverSocket():ServerSocket
 		{
 			return _socket;
 		}
 		
-		/** 서버의 address를 가져오거나 설정한다. 설정은 서버가 실행되고 있지 않을 때에만 할 수 있다. */
+		/** Get or set address of server. Can be set only if server is closed */
 		public function get address():String
 		{
 			return _address;
@@ -96,7 +98,7 @@ package gogduNet.connection
 			_address =value;
 		}
 		
-		/** 서버의 포트를 가져오거나 설정한다. 설정은 서버가 실행되고 있지 않을 때에만 할 수 있다. */
+		/** Get or set port of server. Can be set only if server is closed */
 		public function get port():int
 		{
 			return _port;
@@ -111,7 +113,7 @@ package gogduNet.connection
 			_port =value;
 		}
 		
-		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 객체를 가져오거나 설정한다. */
+		/** Get or set SocketSecurity type object which has list of Permitted or Unpermitted connection. */
 		public function get socketSecurity():SocketSecurity
 		{
 			return _socketSecurity;
@@ -121,19 +123,19 @@ package gogduNet.connection
 			_socketSecurity = value;
 		}
 		
-		/** 서버가 실행 중인지를 나타내는 값을 가져온다. */
+		/** Get whether server is running*/
 		public function get isRunning():Boolean
 		{
 			return _run;
 		}
 		
-		/** 디버그용 기록을 가지고 있는 RecordConsole 객체를 가져온다. */
+		/** Get RecordConsole Object which has record for debug */
 		public function get record():RecordConsole
 		{
 			return _record;
 		}
 		
-		/** 서버가 시작된 후 시간이 얼마나 지났는지를 나타내는 Number 값을 가져온다.(ms) */
+		/** Get elapsed time after run.(ms) */
 		public function get elapsedTimeAfterRun():Number
 		{
 			if(_run == false)
@@ -157,7 +159,7 @@ package gogduNet.connection
 			_socketSecurity = null;
 		}
 		
-		/** 서버 작동 시작 */
+		/** Start server */
 		public function run():void
 		{
 			if(!_address || _run == true)
@@ -186,7 +188,7 @@ package gogduNet.connection
 			dispatchEvent(new GogduNetEvent(GogduNetEvent.CLOSE));
 		}
 		
-		/** 서버 작동 중지 */
+		/** Close server */
 		public function close():void
 		{
 			if(_run == false)
