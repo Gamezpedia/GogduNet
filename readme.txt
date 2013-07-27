@@ -1,14 +1,10 @@
 ﻿GogduNet - AS3 Communication Library
 for TCP and UDP and P2P
-Version 2.21 (2013.7.23.)
+Version 3.0 (2013.7.26.)
 
 Made by Siyania
 (siyania@naver.com)
 (http://siyania.blog.me/)
-
-Me : "愛してる、ミク！”
-God : "きもい…”
-Me : ”うるさい！神くせに！”
 
 TCPServer : AIR 3.0 Desktop, AIR 3.8
 
