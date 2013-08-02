@@ -19,12 +19,12 @@ package gogduNet.connection
 	public class TCPSocket extends SocketBase
 	{
 		private var _socket:Socket;
-		private var _backupByteArray:ByteArray;
+		private var __backupBuffer:ByteArray;
+		private var __unitedBuffer:Vector.<Object>;
 		
-		/** 반드시 nativeSocket, id 속성을 설정해야 한다. */
+		/** 반드시 initialize() 함수를 실행하고 nativeSocket, id 속성을 설정해야 한다. */
 		public function TCPSocket()
 		{
-			initialize();
 		}
 		
 		override public function initialize():void
@@ -32,7 +32,8 @@ package gogduNet.connection
 			super.initialize();
 			
 			_socket = null;
-			_backupByteArray = new ByteArray();
+			__backupBuffer = new ByteArray();
+			__unitedBuffer = new <Object>[];
 		}
 		
 		/** 플래시 네이티브 소켓을 가져온다. */
@@ -73,11 +74,20 @@ package gogduNet.connection
 		}
 		
 		/** 통신을 할 때 아직 처리하지 못 한 패킷을 보관하는 바이트 배열이다.
-		 * 배열이 수정되면 오류가 날 수 있으므로 건드리지 않는 것이 좋다.
+		 * (이 속성은 건드리지 않는 것이 좋다.)
 		 */
-		internal function get _backupBytes():ByteArray
+		internal function get _backupBuffer():ByteArray
 		{
-			return _backupByteArray;
+			return __backupBuffer;
+		}
+		
+		/** 패킷을 한 번에 뭉쳐서 보내기 위해 사용되는 배열 버퍼이며,
+		 * 배열에 사용되는 Object 객체는 UnitedPacketNod.create()로 만들 수 있다.
+		 * (이 속성은 건드리지 않는 것이 좋다.)
+		 */
+		internal function get _unitedBuffer():Vector.<Object>
+		{
+			return __unitedBuffer;
 		}
 		
 		private function _onData(e:ProgressEvent):void
@@ -97,7 +107,8 @@ package gogduNet.connection
 			_socket.removeEventListener(Event.CLOSE, _onClose);
 			_socket.removeEventListener(ProgressEvent.SOCKET_DATA, _onData);
 			_socket = null;
-			_backupByteArray = null;
+			__backupBuffer = null;
+			__unitedBuffer = null;
 		}
 	}
 }

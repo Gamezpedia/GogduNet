@@ -71,8 +71,10 @@ package gogduNet.connection
 			_socketSecurity = socketSecurity;
 		}
 		
-		/** 플래시의 네이티브 소켓을 가져온다. */
-		public function get serverSocket():ServerSocket
+		/** <p>클래스 내부의 ServerSocket 객체를 반환한다.</p>
+		 * <p>close() 함수 등으로 인해 서버가 닫히면 이 속성은 새로 생성된 객체로 바뀐다.</p>
+		 */
+		public function get socket():ServerSocket
 		{
 			return _socket;
 		}
@@ -170,12 +172,16 @@ package gogduNet.connection
 			_record.addRecord(true, "Opened server(runnedTime:" + _runnedTime + ")");
 		}
 		
-		/** 운영체제에 의해 소켓이 닫힘 */
+		/** <p>서버 작동 중지</p>
+		 * <p>(네이티브 플래시의 소켓과 달리, close() 후에도 다시 사용할 수 있습니다.)</p>
+		 */
 		private function _close():void
 		{
 			_socket.close();
 			_socket.removeEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
 			_socket.removeEventListener(Event.CLOSE, _close);
+			
+			_socket = new ServerSocket(); //ServerSocket is non reusable after ServerSocket.close()
 			
 			_record.addRecord(true, "Closed server by OS(elapsedTimeAfterRun:" + elapsedTimeAfterRun + ")");
 			_run = false;

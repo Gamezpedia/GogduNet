@@ -1,7 +1,8 @@
-/** THANKS
- * http://code.google.com/p/actionscript-uuid/
- * yonghaol...@gmail.com
- */
+/* THANKS
+actionscript-uuid
+(https://code.google.com/p/actionscript-uuid/)
+(yonghaolai6@gmail.com)
+*/
 package gogduNet.utils
 {
 	import flash.system.System;
@@ -15,7 +16,7 @@ package gogduNet.utils
 		
 		private static var _buff:ByteArray = new ByteArray;
 		
-		public static function get():String
+		public static function create():String
 		{
 			var r:uint = uint(new Date().time);
 			_buff.length = 0;

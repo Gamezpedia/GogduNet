@@ -26,7 +26,7 @@ package gogduNet.connection
 		
 		public function initialize():void
 		{
-			_id = UUID.get();
+			_id = UUID.create();
 			_lastReceivedTime = -1;
 			_event = new GogduNetEvent(GogduNetEvent.CONNECTION_UPDATE, false, false, null);
 		}

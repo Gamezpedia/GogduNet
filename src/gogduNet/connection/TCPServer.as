@@ -13,6 +13,7 @@ package gogduNet.connection
 	import gogduNet.connection.TCPSocket;
 	import gogduNet.events.DataEvent;
 	import gogduNet.events.GogduNetEvent;
+	import gogduNet.utils.Base64;
 	import gogduNet.utils.ObjectPool;
 	import gogduNet.utils.RecordConsole;
 	import gogduNet.utils.SocketSecurity;
@@ -63,9 +64,11 @@ package gogduNet.connection
 	{
 		/** 연결 검사를 하는 주기 */
 		private var _checkConnectionDelay:Number;
+		/** 패킷을 뭉쳐 보내는 간격 */
+		private var _unitedSendingInterval:Number;
 		
-		/** 최대 연결 지연 한계 **/
-		private var _connectionDelayLimit:Number;
+		/** 통신 응답 경과 한계 **/
+		private var _idleTimeoutLimit:Number;
 		
 		/** 서버 소켓 */
 		private var _socket:ServerSocket;
@@ -81,7 +84,7 @@ package gogduNet.connection
 		/** 마지막으로 통신한 시각(정확히는 마지막으로 정보를 전송 받은 시각) */
 		private var _lastReceivedTime:Number;
 		/** 최대 인원 */
-		private var _maxSockets:int;
+		private var _maxSockets:uint;
 		/** 디버그용 기록 */
 		private var _record:RecordConsole;
 		
@@ -98,18 +101,20 @@ package gogduNet.connection
 		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체 */
 		private var _socketSecurity:SocketSecurity;
 		
+		/** 뭉쳐 보낼 패킷이 있는 소켓 목록. String 값은 소켓(TCPSocket)의 id 속성 */
+		private var _unitedSendingSockets:Vector.<String>;
+		
 		/** <p>serverAddress : 서버로 사용할 address</p>
 		 * <p>serverPort : 서버로 사용할 포트</p>
 		 * <p>maxSockets : 최대 인원 수 제한.<p/>
 		 * 음수로 설정한 경우 따로 제한을 두지 않음. </p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)<p/>
-		 * (여기서 설정한 시간 동안 소켓으로부터 데이터가 오지 않으면 그 소켓과는 연결이 끊긴 것으로 간주한다.)</p>
 		 */
-		public function TCPServer(serverAddress:String="0.0.0.0", serverPort:int=0, maxSockets:int=10, socketSecurity:SocketSecurity=null,
-								  connectionDelayLimit:Number=10000)
+		public function TCPServer(serverAddress:String="0.0.0.0", serverPort:int=0, maxSockets:uint=10, socketSecurity:SocketSecurity=null)
 		{
-			_checkConnectionDelay = connectionDelayLimit / 5;
-			_connectionDelayLimit = connectionDelayLimit;
+			_checkConnectionDelay = 60000 / 5;
+			_idleTimeoutLimit = 60000;
+			
+			_unitedSendingInterval = 100;
 			
 			_socket = new ServerSocket();
 			
@@ -119,8 +124,11 @@ package gogduNet.connection
 			_run = false;
 			_runnedTime = -1;
 			_lastReceivedTime = -1;
+			
 			_maxSockets = maxSockets;
+			
 			_record = new RecordConsole();
+			
 			_socketArray = new Vector.<TCPSocket>();
 			_idTable = {};
 			
@@ -132,22 +140,44 @@ package gogduNet.connection
 				socketSecurity = new SocketSecurity(false);
 			}
 			_socketSecurity = socketSecurity;
+			
+			_unitedSendingSockets = new <String>[];
 		}
 		
-		/** <p>연결 지연 한계 시간을 가져오거나 설정한다.(ms)</p>
+		/** <p>통신 응답 경과 한계 시간을 가져오거나 설정한다.(ms)</p>
 		 * <p>이 시간을 넘도록 정보가 수신되지 않은 경우엔 연결이 끊긴 것으로 간주하고 이쪽에서도 연결을 끊는다.</p>
+		 * <p>기본값은 60000</p>
+		 * <p>여기서 설정한 시간이 지난다고 반드시 바로 연결을 끊는 것은 아닙니다.
+		 * 프로그램이 멈추지 않기 위해서 검사 작업이 비동기로 처리되기 때문에,
+		 * 연결된 클라이언트의 수가 너무 많은 경우엔 여기서 설정된 시간보다 늦게 연결이 끊길 수 있습니다.</p>
 		 */
-		public function get connectionDelayLimit():Number
+		public function get idleTimeoutLimit():Number
 		{
-			return _connectionDelayLimit;
+			return _idleTimeoutLimit;
 		}
-		public function set connectionDelayLimit(value:Number):void
+		public function set idleTimeoutLimit(value:Number):void
 		{
-			_connectionDelayLimit = value;
-			_checkConnectionDelay = _connectionDelayLimit / 5;
+			_idleTimeoutLimit = value;
+			_checkConnectionDelay = _idleTimeoutLimit / 5;
 		}
 		
-		/** 플래시 네이티브 서버 소켓을 가져온다. */
+		/** <p>패킷을 뭉쳐서 보내는 간격을 가져오거나 설정한다.(ms) 기본값은 100.</p>
+		 * <p>반드시 여기서 설정된 시간을 간격으로 전송되진 않습니다. 프로그램이 멈추지 않기 위해서
+		 * 전송 작업이 비동기로 처리되기 때문에, 전송할 클라이언트의 수가 너무 많은 경우엔
+		 * 여기서 설정된 시간보다 늦게 전송될 수 있습니다.</p>
+		 */
+		public function get unitedSendingInterval():Number
+		{
+			return _unitedSendingInterval;
+		}
+		public function set unitedSendingInterval(value:Number):void
+		{
+			_unitedSendingInterval = value;
+		}
+		
+		/** <p>클래스 내부의 ServerSocket 객체를 반환한다.</p>
+		 * <p>close() 함수 등으로 인해 서버가 닫히면 이 속성은 새로 생성된 객체로 바뀐다.</p>
+		 */
 		public function get socket():ServerSocket
 		{
 			return _socket;
@@ -191,11 +221,11 @@ package gogduNet.connection
 		
 		/** <p>서버의 최대 인원 제한 수를 가져오거나 설정한다.</p>
 		 * <p>(이 값은 새로 들어오는 연결에만 영향을 주며, 기존 연결은 끊어지지 않는다.)</p> */
-		public function get maxSockets():int
+		public function get maxSockets():uint
 		{
 			return _maxSockets;
 		}
-		public function set maxSockets(value:int):void
+		public function set maxSockets(value:uint):void
 		{
 			_maxSockets = value;
 		}
@@ -211,7 +241,7 @@ package gogduNet.connection
 		}
 		
 		/** 서버의 현재 인원을 가져온다. */
-		public function get numSockets():int
+		public function get numSockets():uint
 		{
 			return _socketArray.length;
 		}
@@ -259,7 +289,7 @@ package gogduNet.connection
 		/** address가 일치하는 소켓을 가져온다.(같은 address를 가진 소켓이 여러 개 존재할 수도 있다) */
 		public function getSocketByAddress(address:String):TCPSocket
 		{
-			var i:int;
+			var i:uint;
 			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
@@ -286,7 +316,7 @@ package gogduNet.connection
 		/** 포트가 일치하는 소켓을 가져온다.(같은 포트를 가진 소켓이 여러 개 존재할 수도 있다) */
 		public function getSocketByPort(port:int):TCPSocket
 		{
-			var i:int;
+			var i:uint;
 			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
@@ -313,7 +343,7 @@ package gogduNet.connection
 		/** address와 포트가 모두 일치하는 소켓을 가져온다.(유일하다) */
 		public function getSocketByAddressAndPort(address:String, port:int):TCPSocket
 		{
-			var i:int;
+			var i:uint;
 			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
@@ -356,7 +386,7 @@ package gogduNet.connection
 				resultVector = new Vector.<TCPSocket>();
 			}
 			
-			var i:int;
+			var i:uint;
 			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
@@ -385,7 +415,7 @@ package gogduNet.connection
 				resultVector = new Vector.<TCPSocket>();
 			}
 			
-			var i:int;
+			var i:uint;
 			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
@@ -417,7 +447,7 @@ package gogduNet.connection
 				resultVector = new Vector.<TCPSocket>();
 			}
 			
-			var i:int;
+			var i:uint;
 			var socket:TCPSocket;
 			
 			for(i = 0; i < _socketArray.length; i += 1)
@@ -441,12 +471,10 @@ package gogduNet.connection
 			return resultVector;
 		}
 		
+		/** 서버 소켓이 바인딩될 address와 포트를 설정한다. 서버가 실행되고 있지 않을 때에만 할 수 있다. */
 		public function bind(address:String, port:int):void
 		{
-			if(_run == true)
-			{
-				return;
-			}
+			if(_run == true){return;}
 			
 			_address = address;
 			_port = port;
@@ -474,6 +502,8 @@ package gogduNet.connection
 			_socket.removeEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
 			_socket.removeEventListener(Event.CLOSE, _closedByOS);
 			
+			this.removeEventListener(DataEvent.DATA_RECEIVE, _receiveUnitedPacket);
+			
 			_socket = null;
 			_address = null;
 			
@@ -489,6 +519,8 @@ package gogduNet.connection
 			
 			_socketSecurity.dispose();
 			_socketSecurity = null;
+			
+			_unitedSendingSockets = null;
 			
 			_run = false;
 		}
@@ -507,9 +539,14 @@ package gogduNet.connection
 			_socket.addEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
 			_socket.addEventListener(Event.CLOSE, _closedByOS);
 			
+			this.addEventListener(DataEvent.DATA_RECEIVE, _receiveUnitedPacket);
+			
 			//first 100 : amount per once run
 			//second 100 : run delay
 			setTimeout(_checkConnection, _checkConnectionDelay, 0, 100, 100);
+			//first 100 : amount per once run
+			//second 100 : run delay
+			setTimeout(_unitedSend, _unitedSendingInterval, 0, 100, 100);
 			
 			_run = true;
 			_record.addRecord(true, "Opened server(runnedTime:" + _runnedTime + ")");
@@ -558,10 +595,15 @@ package gogduNet.connection
 			_idTable = {};
 			_socketPool.clear();
 			
+			_unitedSendingSockets.length = 0;
+			
 			_socket.close();
 			_socket.removeEventListener(ServerSocketConnectEvent.CONNECT, _socketConnect);
 			_socket.removeEventListener(Event.CLOSE, _close);
+			
 			_socket = new ServerSocket(); //ServerSocket is non reusable after ServerSocket.close()
+			
+			this.removeEventListener(DataEvent.DATA_RECEIVE, _receiveUnitedPacket);
 			
 			_run = false;
 		}
@@ -583,182 +625,221 @@ package gogduNet.connection
 			return _sendDataToNativeSocket(nativeSocket, DataType.SYSTEM, definition, data);
 		}
 		
-		private function _sendData(id:String, type:uint, definition:uint, data:ByteArray):Boolean
+		private function _sendData(id:String, type:uint, definition:uint, data:ByteArray, unity:Boolean):Boolean
 		{
 			var socket:TCPSocket = getSocketByID(id);
 			if(socket == null){return false;}
 			
-			var packet:ByteArray = Packet.create(type, definition, data);
-			if(packet == null){return false;}
+			if(unity == true)
+			{
+				var node:Object = UnitedPacketNode.create(type, definition, data);
+				socket._unitedBuffer.push(node);
+				
+				_unitedSendingSockets.push(id);
+				return true;
+			}
+			else
+			{
+				var packet:ByteArray = Packet.create(type, definition, data);
+				if(packet == null){return false;}
+				
+				var nativeSocket:Socket = socket.nativeSocket;
+				
+				nativeSocket.writeBytes(packet, 0);
+				nativeSocket.flush();
+				return true;
+			}
 			
-			var nativeSocket:Socket = socket.nativeSocket;
-			
-			nativeSocket.writeBytes(packet, 0);
-			nativeSocket.flush();
-			return true;
+			return false;
 		}
 		
-		private function _sendSystemData(id:String, definition:uint, data:ByteArray=null):Boolean
+		private function _sendSystemData(id:String, definition:uint, data:ByteArray=null, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
-			return _sendData(id, DataType.SYSTEM, definition, data);
+			return _sendData(id, DataType.SYSTEM, definition, data, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendDefinition(id:String, definition:uint):Boolean
+		public function sendDefinition(id:String, definition:uint, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
-			return _sendData(id, DataType.DEFINITION, definition, null);
+			return _sendData(id, DataType.DEFINITION, definition, null, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBoolean(id:String, definition:uint, data:Boolean):Boolean
+		public function sendBoolean(id:String, definition:uint, data:Boolean, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeBoolean(data);
 			
-			return _sendData(id, DataType.BOOLEAN, definition, bytes);
+			return _sendData(id, DataType.BOOLEAN, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendByte(id:String, definition:uint, data:int):Boolean
+		public function sendByte(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendData(id, DataType.BYTE, definition, bytes);
+			return _sendData(id, DataType.BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedByte(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedByte(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendData(id, DataType.UNSIGNED_BYTE, definition, bytes);
+			return _sendData(id, DataType.UNSIGNED_BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendShort(id:String, definition:uint, data:int):Boolean
+		public function sendShort(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendData(id, DataType.SHORT, definition, bytes);
+			return _sendData(id, DataType.SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedShort(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedShort(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendData(id, DataType.UNSIGNED_SHORT, definition, bytes);
+			return _sendData(id, DataType.UNSIGNED_SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendInt(id:String, definition:uint, data:int):Boolean
+		public function sendInt(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeInt(data);
 			
-			return _sendData(id, DataType.INT, definition, bytes);
+			return _sendData(id, DataType.INT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedInt(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedInt(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeUnsignedInt(data);
 			
-			return _sendData(id, DataType.UNSIGNED_INT, definition, bytes);
+			return _sendData(id, DataType.UNSIGNED_INT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendFloat(id:String, definition:uint, data:Number):Boolean
+		public function sendFloat(id:String, definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeFloat(data);
 			
-			return _sendData(id, DataType.FLOAT, definition, bytes);
+			return _sendData(id, DataType.FLOAT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendDouble(id:String, definition:uint, data:Number):Boolean
+		public function sendDouble(id:String, definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeDouble(data);
 			
-			return _sendData(id, DataType.DOUBLE, definition, bytes);
+			return _sendData(id, DataType.DOUBLE, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBytes(id:String, definition:uint, data:ByteArray):Boolean
+		public function sendBytes(id:String, definition:uint, data:ByteArray, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
-			return _sendData(id, DataType.BYTES, definition, data);
+			return _sendData(id, DataType.BYTES, definition, data, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendString(id:String, definition:uint, data:String):Boolean
+		public function sendString(id:String, definition:uint, data:String, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(data, EncodingFormat.encoding);
 			
-			return _sendData(id, DataType.STRING, definition, bytes);
+			return _sendData(id, DataType.STRING, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendArray(id:String, definition:uint, data:Array):Boolean
+		public function sendArray(id:String, definition:uint, data:Array, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
@@ -767,13 +848,15 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendData(id, DataType.ARRAY, definition, bytes);
+			return _sendData(id, DataType.ARRAY, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendObject(id:String, definition:uint, data:Object):Boolean
+		public function sendObject(id:String, definition:uint, data:Object, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
@@ -782,10 +865,10 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendData(id, DataType.OBJECT, definition, bytes);
+			return _sendData(id, DataType.OBJECT, definition, bytes, unity);
 		}
 		
-		private function _sendDataToAll(type:uint, definition:uint, data:ByteArray):Boolean
+		private function _sendDataToAll(type:uint, definition:uint, data:ByteArray, unity:Boolean):Boolean
 		{
 			var i:int;
 			var socket:TCPSocket;
@@ -798,7 +881,7 @@ package gogduNet.connection
 				socket = _socketArray[i];
 				if(socket.isConnected == false){continue;}
 				
-				if(_sendData(socket.id, type, definition, data) == false)
+				if(_sendData(socket.id, type, definition, data, unity) == false)
 				{
 					tf = false;
 				}
@@ -807,167 +890,193 @@ package gogduNet.connection
 			return tf;
 		}
 		
-		public function sendSystemDataToAll(id:String, definition:uint, data:ByteArray=null):Boolean
+		public function sendSystemDataToAll(id:String, definition:uint, data:ByteArray=null, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
-			return _sendDataToAll(DataType.SYSTEM, definition, data);
+			return _sendDataToAll(DataType.SYSTEM, definition, data, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendDefinitionToAll(definition:uint):Boolean
+		public function sendDefinitionToAll(definition:uint, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
-			return _sendDataToAll(DataType.DEFINITION, definition, null);
+			return _sendDataToAll(DataType.DEFINITION, definition, null, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBooleanToAll(id:String, definition:uint, data:Boolean):Boolean
+		public function sendBooleanToAll(id:String, definition:uint, data:Boolean, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeBoolean(data);
 			
-			return _sendDataToAll(DataType.BOOLEAN, definition, bytes);
+			return _sendDataToAll(DataType.BOOLEAN, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendByteToAll(id:String, definition:uint, data:int):Boolean
+		public function sendByteToAll(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendDataToAll(DataType.BYTE, definition, bytes);
+			return _sendDataToAll(DataType.BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedByteToAll(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedByteToAll(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendDataToAll(DataType.UNSIGNED_BYTE, definition, bytes);
+			return _sendDataToAll(DataType.UNSIGNED_BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendShortToAll(id:String, definition:uint, data:int):Boolean
+		public function sendShortToAll(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendDataToAll(DataType.SHORT, definition, bytes);
+			return _sendDataToAll(DataType.SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedShortToAll(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedShortToAll(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendDataToAll(DataType.UNSIGNED_SHORT, definition, bytes);
+			return _sendDataToAll(DataType.UNSIGNED_SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendIntToAll(id:String, definition:uint, data:int):Boolean
+		public function sendIntToAll(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeInt(data);
 			
-			return _sendDataToAll(DataType.INT, definition, bytes);
+			return _sendDataToAll(DataType.INT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedIntToAll(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedIntToAll(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeUnsignedInt(data);
 			
-			return _sendDataToAll(DataType.UNSIGNED_INT, definition, bytes);
+			return _sendDataToAll(DataType.UNSIGNED_INT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendFloatToAll(id:String, definition:uint, data:Number):Boolean
+		public function sendFloatToAll(id:String, definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeFloat(data);
 			
-			return _sendDataToAll(DataType.FLOAT, definition, bytes);
+			return _sendDataToAll(DataType.FLOAT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendDoubleToAll(id:String, definition:uint, data:Number):Boolean
+		public function sendDoubleToAll(id:String, definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeDouble(data);
 			
-			return _sendDataToAll(DataType.DOUBLE, definition, bytes);
+			return _sendDataToAll(DataType.DOUBLE, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBytesToAll(id:String, definition:uint, data:ByteArray):Boolean
+		public function sendBytesToAll(id:String, definition:uint, data:ByteArray, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
-			return _sendDataToAll(DataType.BYTES, definition, data);
+			return _sendDataToAll(DataType.BYTES, definition, data, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendStringToAll(id:String, definition:uint, data:String):Boolean
+		public function sendStringToAll(id:String, definition:uint, data:String, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(data, EncodingFormat.encoding);
 			
-			return _sendDataToAll(DataType.STRING, definition, bytes);
+			return _sendDataToAll(DataType.STRING, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendArrayToAll(id:String, definition:uint, data:Array):Boolean
+		public function sendArrayToAll(id:String, definition:uint, data:Array, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
@@ -976,13 +1085,15 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendDataToAll(DataType.ARRAY, definition, bytes);
+			return _sendDataToAll(DataType.ARRAY, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 소켓에게 데이터를 전송한다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendObjectToAll(id:String, definition:uint, data:Object):Boolean
+		public function sendObjectToAll(id:String, definition:uint, data:Object, unity:Boolean=false):Boolean
 		{
 			if(_run == false){return false;}
 			
@@ -991,7 +1102,7 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendDataToAll(DataType.OBJECT, definition, bytes);
+			return _sendDataToAll(DataType.OBJECT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 소켓과의 연결을 끊는다.</p>
@@ -1120,13 +1231,134 @@ package gogduNet.connection
 			_removeSocket(socket);
 		}
 		
+		/** 뭉친 패킷 수신 */
+		private function _receiveUnitedPacket(e:DataEvent):void
+		{
+			if(e.dataType == DataType.SYSTEM)
+			{
+				if(e.dataDefinition == DataDefinition.UNITED_PACKET)
+				{
+					var socketID:String = e.socketID;
+					
+					var bytes:ByteArray = e.data as ByteArray;
+					bytes.position = 0;
+					
+					try{var str:String = bytes.readMultiByte(bytes.length, EncodingFormat.encoding);}
+					catch(e:Error)
+					{
+						dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+						return;
+					}
+					
+					try{var array:Array = JSON.parse(str) as Array;}
+					catch(e:Error)
+					{
+						dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+						return;
+					}
+					
+					var i:uint;
+					for(i = 0; i < array.length; i += 1)
+					{
+						if(!array[i])
+						{
+							dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+							continue;
+						}
+						
+						var obj:Object = array[i];
+						
+						if( !obj.type || !obj.def || !obj.data || !(obj.type is uint) || !(obj.def is uint) || !(obj.data is String) )
+						{
+							dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+							continue;
+						}
+						
+						var type:uint = obj.type;
+						var def:uint = obj.def;
+						var dataStr:String = obj.data;
+						
+						try{var dataBytes:ByteArray = Base64.decode(dataStr);}
+						catch(e:Error)
+						{
+							dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+							continue;
+						}
+						
+						var parsedData:Object = Packet.parseData(type, dataBytes);
+						if(parsedData == null)
+						{
+							dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+							continue;
+						}
+						
+						dispatchEvent( new DataEvent(DataEvent.DATA_RECEIVE, false, false, socketID, type, def, parsedData) );
+					}
+				}
+			}
+		}
+		
+		/** 패킷 뭉쳐 보내기(Async) */
+		private function _unitedSend(startIndex:uint, amountPerRun:uint, delay:Number):void
+		{
+			if(_run == false){return;}
+			else if(!_unitedSendingSockets){return;}
+			
+			var i:uint;
+			var j:uint;
+			var id:String;
+			var socket:TCPSocket;
+			
+			for(i = startIndex; (i < startIndex + amountPerRun) && (i < _unitedSendingSockets.length); i += 1)
+			{
+				if(!_unitedSendingSockets[i]){continue;}
+				
+				id = _unitedSendingSockets[i];
+				socket = getSocketByID(id);
+				
+				if(socket == null || socket.isConnected == false)
+				{
+					continue;
+				}
+				
+				var buffer:Vector.<Object> = socket._unitedBuffer;
+				
+				var len:uint = buffer.length;
+				var arr:Array = [];
+				
+				//Vector to Array
+				for(j = 0; j < len; j += 1)
+				{
+					arr[j] = buffer[j];
+				}
+				
+				var str:String = JSON.stringify(arr);
+				var bytes:ByteArray = new ByteArray();
+				bytes.writeMultiByte(str, EncodingFormat.encoding);
+				
+				_sendSystemData(id, DataDefinition.UNITED_PACKET, bytes, false);
+				
+				buffer.length = 0;
+			}
+			
+			if(i < _unitedSendingSockets.length-1)
+			{
+				setTimeout(_unitedSend, delay, i, amountPerRun, delay);
+			}
+			else
+			{
+				_unitedSendingSockets.length = 0;
+				setTimeout(_unitedSend, _unitedSendingInterval, 0, amountPerRun, delay);
+			}
+		}
+		
 		/** 클라이언트의 접속을 검사.(Async) */
-		private function _checkConnection(startIndex:int, amountPerRun:uint, delay:Number):void
+		private function _checkConnection(startIndex:uint, amountPerRun:uint, delay:Number):void
 		{
 			if(_run == false){return;}
 			else if(!_socketArray){return;}
 			
-			var i:int;
+			var i:uint;
 			var socket:TCPSocket;
 			var id:String;
 			
@@ -1145,7 +1377,7 @@ package gogduNet.connection
 				}
 				
 				// 일정 시간 이상 전송이 오지 않을 경우 접속이 끊긴 것으로 간주하여 이쪽에서도 접속을 끊는다.
-				if(socket.elapsedTimeAfterLastReceived > _connectionDelayLimit)
+				if(socket.elapsedTimeAfterLastReceived > _idleTimeoutLimit)
 				{
 					id = socket.id;
 					
@@ -1202,7 +1434,7 @@ package gogduNet.connection
 			dispatchEvent( new DataEvent(DataEvent.DATA_COME, false, false, id, 0, 0, cameBytes) );
 			
 			//백업해 놓은 바이트 배열을 가지고 온다.
-			packetBytes = _getBackupBytes(socket);
+			packetBytes = _getBackupBuffer(socket);
 			packetBytes.position = 0;
 			packetBytes.writeBytes(cameBytes);
 			
@@ -1217,11 +1449,11 @@ package gogduNet.connection
 				data = datas[i];
 				inData = data.packet;
 				
-				if(data.event == "receive")
+				if(data.event == ParsedNode.RECEIVE_EVENT)
 				{
 					dispatchEvent( new DataEvent(DataEvent.DATA_RECEIVE, false, false, id, inData.type, inData.def, inData.data) );
 				}
-				if(data.event == "invalid")
+				if(data.event == ParsedNode.INVALID_EVENT)
 				{
 					dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, id, 0, 0, inData.data) );
 				}
@@ -1232,9 +1464,9 @@ package gogduNet.connection
 		}
 		
 		/** 백업해 놓은 바이트 배열을 반환한다. */
-		private function _getBackupBytes(socket:TCPSocket):ByteArray
+		private function _getBackupBuffer(socket:TCPSocket):ByteArray
 		{
-			return socket._backupBytes;
+			return socket._backupBuffer;
 		}
 		
 		/** 다 처리하고 난 후에도 남아 있는(패킷이 다 오지 않아 처리가 안 된) 데이터를 소켓의 _backupBytes에 임시로 저장해 둔다. */
@@ -1242,8 +1474,8 @@ package gogduNet.connection
 		{
 			if(bytes.length > 0)
 			{
-				socket._backupBytes.clear();
-				socket._backupBytes.writeBytes(bytes, 0);
+				socket._backupBuffer.clear();
+				socket._backupBuffer.writeBytes(bytes, 0);
 			}
 		}
 	} // class

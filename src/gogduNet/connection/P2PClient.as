@@ -16,6 +16,7 @@ package gogduNet.connection
 	import gogduNet.connection.P2PPeer;
 	import gogduNet.events.DataEvent;
 	import gogduNet.events.GogduNetEvent;
+	import gogduNet.utils.Base64;
 	import gogduNet.utils.ObjectPool;
 	import gogduNet.utils.RecordConsole;
 	import gogduNet.utils.SocketSecurity;
@@ -40,7 +41,7 @@ package gogduNet.connection
 	 */
 	[Event(name="socketConnect", type="gogduNet.events.GogduNetEvent")]
 	/** <p>이웃(다른 피어)과의 연결이 끊긴 경우 발생</p>
-	 * <p>(data:끊긴 피어의 peerID)</p>
+	 * <p>(data: {id:끊긴 피어의 id, peerID:끊긴 피어의 peerID} )</p>
 	 */
 	[Event(name="socketClose", type="gogduNet.events.GogduNetEvent")]
 	/** <p>허용되지 않은 대상이 연결을 시도하면 발생</p>
@@ -73,9 +74,12 @@ package gogduNet.connection
 	{
 		/** 연결 검사를 하는 주기 */
 		private var _checkConnectionDelay:Number;
-		
-		/** 최대 연결 지연 한계 **/
-		private var _connectionDelayLimit:Number;
+		/** 통신 응답 경과 한계 **/
+		private var _idleTimeoutLimit:Number;
+		/** 패킷을 뭉쳐 보내는 간격(_unitedSend) */
+		private var _unitedSendingInterval:Number;
+		/** 패킷을 뭉쳐서 보내는 간격을 재는 타이머(_unitedSendToAll) */
+		private var _unitedSendingTimer:Timer;
 		
 		private var _url:String;
 		private var _netGroupName:String;
@@ -108,17 +112,24 @@ package gogduNet.connection
 		/** 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체 */
 		private var _socketSecurity:SocketSecurity;
 		
+		/** 패킷을 한 번에 뭉쳐서 보내기 위해 사용되는 배열 버퍼. */
+		private var _unitedBuffer:Vector.<Object>;
+		/** 뭉쳐 보낼 패킷이 있는 피어 목록. String 값은 피어(P2PPeer)의 id 속성 */
+		private var _unitedSendingPeers:Vector.<String>;
+		
 		/** <p>url : 접속할 주소(rtmfp)</p>
 		 * <p>netGroupName : NetGroup 이름</p>
+		 * <p>maxPeer : 클래스 내부 NetConnection 객체의 maxPeerConnections 속성을 설정한다.</p>
 		 * <p>socketSecurity : 통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 타입 객체.</p>
 		 * <p>값이 null인 경우 자동으로 생성(new SocketSecurity(false))</p>
-		 * <p>connectionDelayLimit : 연결 지연 한계(ms)</p>
-		 * <p>(여기서 설정한 시간 동안 특정 피어로부터 데이터가 오지 않으면 그 피어와 연결이 끊긴 것으로 간주한다.)</p>
 		 */
-		public function P2PClient(url:String, netGroupName:String="GogduNet", socketSecurity:SocketSecurity=null, connectionDelayLimit:Number=10000)
+		public function P2PClient(url:String, netGroupName:String="GogduNet", maxPeers:uint=10, socketSecurity:SocketSecurity=null)
 		{
-			_checkConnectionDelay = connectionDelayLimit / 5;
-			_connectionDelayLimit = connectionDelayLimit;
+			_checkConnectionDelay = 60000 / 5;
+			_idleTimeoutLimit = 60000;
+			
+			_unitedSendingInterval = 100;
+			_unitedSendingTimer = new Timer(_unitedSendingInterval);
 			
 			_url = url;
 			_netGroupName = netGroupName;
@@ -132,6 +143,7 @@ package gogduNet.connection
 			_groupSpecifier.ipMulticastMemberUpdatesEnabled = true;
 			
 			_netConnection = new NetConnection();
+			_netConnection.maxPeerConnections = maxPeers;
 			
 			_isConnected = false;
 			_connectedTime = -1;
@@ -149,6 +161,32 @@ package gogduNet.connection
 				socketSecurity = new SocketSecurity(false);
 			}
 			_socketSecurity = socketSecurity;
+			
+			_unitedBuffer = new <Object>[];
+		}
+		
+		/** <p>클래스 내부의 NetConnection 객체를 반환한다.</p>
+		 * <p>close() 함수 등으로 인해 연결이 닫히면 이 속성은 새로 생성된 객체로 바뀐다.</p>
+		 */
+		public function get netConnection():NetConnection
+		{
+			return _netConnection;
+		}
+		
+		/** <p>클래스 내부의 NetGroup 객체를 반환한다.</p>
+		 * <p>매 연결 시마다 이 속성은 새로 생성된 객체로 바뀐다.</p>
+		 */
+		public function get netGroup():NetGroup
+		{
+			return _netGroup;
+		}
+		
+		/** <p>클래스 내부의 NetStream 객체를 반환한다.</p>
+		 * <p>매 연결 시마다 이 속성은 새로 생성된 객체로 바뀐다.</p>
+		 */
+		public function get netStream():NetStream
+		{
+			return _netStream;
 		}
 		
 		/** 연결할 url 값을 가져오거나 설정한다. 설정은 연결하고 있지 않을 때에만 할 수 있다. */
@@ -181,6 +219,16 @@ package gogduNet.connection
 			_netGroupName = value;
 		}
 		
+		/** 클래스 내부 NetConnection 객체의 maxPeerConnections 속성을 가져오거나 설정한다. */
+		public function get maxPeers():uint
+		{
+			return _netConnection.maxPeerConnections;
+		}
+		public function set maxPeers(value:uint):void
+		{
+			_netConnection.maxPeerConnections = value;
+		}
+		
 		/** <p>통신이 허용 또는 비허용된 목록을 가지고 있는 SocketSecurity 객체를 가져오거나 설정한다.</p>
 		 * <p>(P2PClient에서만 특수하게, SocketSecurity.addSocket() 함수의 address 인자를 peerID로, 
 		 * port 인자를 음수로 설정해야 합니다.)</p>
@@ -194,17 +242,36 @@ package gogduNet.connection
 			_socketSecurity = value;
 		}
 		
-		/** 연결 지연 한계를 가져오거나 설정한다. (ms)
-		 * 이 시간을 넘도록 정보가 수신되지 않은 경우엔 연결이 끊긴 것으로 간주하고 이쪽에서도 연결을 끊는다.
+		/** <p>통신 응답 경과 한계 시간을 가져오거나 설정한다.(ms)</p>
+		 * <p>이 시간을 넘도록 정보가 수신되지 않은 경우엔 연결이 끊긴 것으로 간주하고 이쪽에서도 연결을 끊는다.</p>
+		 * <p>기본값은 60000</p>
+		 * <p>여기서 설정한 시간이 지난다고 반드시 바로 연결을 끊는 것은 아닙니다.
+		 * 프로그램이 멈추지 않기 위해서 검사 작업이 비동기로 처리되기 때문에,
+		 * 연결된 클라이언트의 수가 너무 많은 경우엔 여기서 설정된 시간보다 늦게 연결이 끊길 수 있습니다.</p>
 		 */
-		public function get connectionDelayLimit():Number
+		public function get idleTimeoutLimit():Number
 		{
-			return _connectionDelayLimit;
+			return _idleTimeoutLimit;
 		}
-		public function set connectionDelayLimit(value:Number):void
+		public function set idleTimeoutLimit(value:Number):void
 		{
-			_connectionDelayLimit = value;
-			_checkConnectionDelay = _connectionDelayLimit / 5;
+			_idleTimeoutLimit = value;
+			_checkConnectionDelay = _idleTimeoutLimit / 5;
+		}
+		
+		/** <p>패킷을 뭉쳐서 보내는 간격을 가져오거나 설정한다.(ms) 기본값은 100.</p>
+		 * <p>반드시 여기서 설정된 시간을 간격으로 전송되진 않습니다. 프로그램이 멈추지 않기 위해서
+		 * 전송 작업이 비동기로 처리되기 때문에, 전송할 클라이언트의 수가 너무 많은 경우엔
+		 * 여기서 설정된 시간보다 늦게 전송될 수 있습니다.</p>
+		 */
+		public function get unitedSendingInterval():Number
+		{
+			return _unitedSendingInterval;
+		}
+		public function set unitedSendingInterval(value:Number):void
+		{
+			_unitedSendingInterval = value;
+			_unitedSendingTimer.delay = _unitedSendingInterval;
 		}
 		
 		/** 나 자신의 peer id를 가져온다. */
@@ -313,7 +380,7 @@ package gogduNet.connection
 		
 		private function _close():void
 		{
-			var i:int;
+			var i:uint;
 			var peer:P2PPeer;
 			
 			for(i = 0; i < _peerArray.length; i += 1)
@@ -336,14 +403,25 @@ package gogduNet.connection
 			_idTable = {};
 			_peerPool.clear();
 			
+			_unitedSendingTimer.removeEventListener(TimerEvent.TIMER, _unitedSendToAll);
+			_unitedSendingTimer.stop();
+			
 			_netStream.close();
+			_netStream.client = {};
 			
 			_netGroup.close();
 			_netGroup.removeEventListener(NetStatusEvent.NET_STATUS, _onNetStatus);
 			
 			_netConnection.close();
 			_netConnection.removeEventListener(NetStatusEvent.NET_STATUS, _onNetStatus);
+			
+			this.removeEventListener(DataEvent.DATA_RECEIVE, _receiveUnitedPacket);
+			
+			_unitedBuffer.length = 0;
+			
+			var maxPeers:uint = _netConnection.maxPeerConnections;
 			_netConnection = new NetConnection(); //NetConnection is non reusable after NetConnection.close()
+			_netConnection.maxPeerConnections = maxPeers;
 			
 			_isConnected = false;
 		}
@@ -354,6 +432,10 @@ package gogduNet.connection
 			
 			_url = null;
 			_netGroupName = null;
+			
+			_unitedSendingTimer.removeEventListener(TimerEvent.TIMER, _unitedSendToAll);
+			_unitedSendingTimer.stop();
+			_unitedSendingTimer = null;
 			
 			_groupSpecifier = null;
 			_netConnection = null;
@@ -368,6 +450,8 @@ package gogduNet.connection
 			_peerArray = null;
 			_peerIDTable = null;
 			_idTable = null;
+			
+			_unitedBuffer = null;
 			
 			_event = null;
 			
@@ -430,7 +514,7 @@ package gogduNet.connection
 		/** 해당 peerID의 통신 스트림을 가져온다. */
 		public function getPeerStream(targetPeerID:String):NetStream
 		{
-			var i:int;
+			var i:uint;
 			var peerStream:NetStream;
 			
 			for(i = 0; i < _netStream.peerStreams.length; i += 1)
@@ -451,169 +535,213 @@ package gogduNet.connection
 			return null;
 		}
 		
-		private function _sendData(type:uint, definition:uint, data:ByteArray):Boolean
+		private function _sendData(type:uint, definition:uint, data:ByteArray, unity:Boolean):Boolean
 		{
-			var packet:ByteArray = Packet.create(type, definition, data);
-			if(packet == null){return false;}
+			if(unity == true)
+			{
+				var node:Object = UnitedPacketNode.create(type, definition, data);
+				_unitedBuffer.push(node);
+				return true;
+			}
+			else
+			{
+				var packet:ByteArray = Packet.create(type, definition, data);
+				if(packet == null){return false;}
+				
+				_netStream.send("sendData", packet);
+				return true;
+			}
 			
-			_netStream.send("sendData", packet);
-			return true;
+			return false;
 		}
 		
-		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
-		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
-		 */
-		public function sendDefinition(definition:uint):Boolean
+		private function _sendSystemData(definition:uint, data:ByteArray, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
-			return _sendData(DataType.DEFINITION, definition, null);
+			return _sendData(DataType.SYSTEM, definition, data, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBoolean(definition:uint, data:Boolean):Boolean
+		public function sendDefinition(definition:uint, unity:Boolean=false):Boolean
+		{
+			if(_isConnected == false){return false;}
+			
+			return _sendData(DataType.DEFINITION, definition, null, unity);
+		}
+		
+		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
+		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
+		 */
+		public function sendBoolean(definition:uint, data:Boolean, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeBoolean(data);
 			
-			return _sendData(DataType.BOOLEAN, definition, bytes);
+			return _sendData(DataType.BOOLEAN, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendByte(definition:uint, data:int):Boolean
+		public function sendByte(definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendData(DataType.BYTE, definition, bytes);
+			return _sendData(DataType.BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedByte(definition:uint, data:uint):Boolean
+		public function sendUnsignedByte(definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendData(DataType.UNSIGNED_BYTE, definition, bytes);
+			return _sendData(DataType.UNSIGNED_BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendShort(definition:uint, data:int):Boolean
+		public function sendShort(definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendData(DataType.SHORT, definition, bytes);
+			return _sendData(DataType.SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedShort(definition:uint, data:uint):Boolean
+		public function sendUnsignedShort(definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendData(DataType.UNSIGNED_SHORT, definition, bytes);
+			return _sendData(DataType.UNSIGNED_SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendInt(definition:uint, data:int):Boolean
+		public function sendInt(definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeInt(data);
 			
-			return _sendData(DataType.INT, definition, bytes);
+			return _sendData(DataType.INT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedInt(definition:uint, data:uint):Boolean
+		public function sendUnsignedInt(definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeUnsignedInt(data);
 			
-			return _sendData(DataType.UNSIGNED_INT, definition, bytes);
+			return _sendData(DataType.UNSIGNED_INT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendFloat(definition:uint, data:Number):Boolean
+		public function sendFloat(definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeFloat(data);
 			
-			return _sendData(DataType.FLOAT, definition, bytes);
+			return _sendData(DataType.FLOAT, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendDouble(definition:uint, data:Number):Boolean
+		public function sendDouble(definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeDouble(data);
 			
-			return _sendData(DataType.DOUBLE, definition, bytes);
+			return _sendData(DataType.DOUBLE, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBytes(definition:uint, data:ByteArray):Boolean
+		public function sendBytes(definition:uint, data:ByteArray, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
-			return _sendData(DataType.BYTES, definition, data);
+			return _sendData(DataType.BYTES, definition, data, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendString(definition:uint, data:String):Boolean
+		public function sendString(definition:uint, data:String, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(data, EncodingFormat.encoding);
 			
-			return _sendData(DataType.STRING, definition, bytes);
+			return _sendData(DataType.STRING, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendArray(definition:uint, data:Array):Boolean
+		public function sendArray(definition:uint, data:Array, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
@@ -622,13 +750,15 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendData(DataType.ARRAY, definition, bytes);
+			return _sendData(DataType.ARRAY, definition, bytes, unity);
 		}
 		
 		/** <p>연결되어 있는 모든 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendObject(definition:uint, data:Object):Boolean
+		public function sendObject(definition:uint, data:Object, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
@@ -637,17 +767,27 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendData(DataType.OBJECT, definition, bytes);
+			return _sendData(DataType.OBJECT, definition, bytes, unity);
 		}
 		
-		private function _sendDataByID(id:String, type:uint, definition:uint, data:ByteArray):Boolean
+		private function _sendDataByID(id:String, type:uint, definition:uint, data:ByteArray, unity:Boolean):Boolean
 		{
-			var packet:ByteArray = Packet.create(type, definition, data);
-			if(packet == null){return false;}
+			var peer:P2PPeer = getPeerByID(id);
+			if(peer == null || peer.peerStream == null ){return false;}
 			
-			var peer:P2PPeer = _idTable[id];
-			if(peer && peer.peerStream)
+			if(unity == true)
 			{
+				var node:Object = UnitedPacketNode.create(type, definition, data);
+				peer._unitedBuffer.push(node);
+				
+				_unitedSendingPeers.push(id);
+				return true;
+			}
+			else
+			{
+				var packet:ByteArray = Packet.create(type, definition, data);
+				if(packet == null){return false;}
+				
 				peer.peerStream.send("sendData", packet);
 				return true;
 			}
@@ -655,160 +795,193 @@ package gogduNet.connection
 			return false;
 		}
 		
-		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
-		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
-		 */
-		public function sendDefinitionByID(id:String, definition:uint):Boolean
+		private function _sendSystemDataByID(id:String, definition:uint, data:ByteArray, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
-			return _sendDataByID(id, DataType.DEFINITION, definition, null);
+			return _sendDataByID(id, DataType.SYSTEM, definition, data, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBooleanByID(id:String, definition:uint, data:Boolean):Boolean
+		public function sendDefinitionByID(id:String, definition:uint, unity:Boolean=false):Boolean
+		{
+			if(_isConnected == false){return false;}
+			
+			return _sendDataByID(id, DataType.DEFINITION, definition, null, unity);
+		}
+		
+		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
+		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
+		 */
+		public function sendBooleanByID(id:String, definition:uint, data:Boolean, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeBoolean(data);
 			
-			return _sendDataByID(id, DataType.BOOLEAN, definition, bytes);
+			return _sendDataByID(id, DataType.BOOLEAN, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendByteByID(id:String, definition:uint, data:int):Boolean
+		public function sendByteByID(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendDataByID(id, DataType.BYTE, definition, bytes);
+			return _sendDataByID(id, DataType.BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedByteByID(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedByteByID(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendDataByID(id, DataType.UNSIGNED_BYTE, definition, bytes);
+			return _sendDataByID(id, DataType.UNSIGNED_BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendShortByID(id:String, definition:uint, data:int):Boolean
+		public function sendShortByID(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendDataByID(id, DataType.SHORT, definition, bytes);
+			return _sendDataByID(id, DataType.SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedShortByID(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedShortByID(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendDataByID(id, DataType.UNSIGNED_SHORT, definition, bytes);
+			return _sendDataByID(id, DataType.UNSIGNED_SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendIntByID(id:String, definition:uint, data:int):Boolean
+		public function sendIntByID(id:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeInt(data);
 			
-			return _sendDataByID(id, DataType.INT, definition, bytes);
+			return _sendDataByID(id, DataType.INT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedIntByID(id:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedIntByID(id:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeUnsignedInt(data);
 			
-			return _sendDataByID(id, DataType.UNSIGNED_INT, definition, bytes);
+			return _sendDataByID(id, DataType.UNSIGNED_INT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendFloatByID(id:String, definition:uint, data:Number):Boolean
+		public function sendFloatByID(id:String, definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeFloat(data);
 			
-			return _sendDataByID(id, DataType.FLOAT, definition, bytes);
+			return _sendDataByID(id, DataType.FLOAT, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendDoubleByID(id:String, definition:uint, data:Number):Boolean
+		public function sendDoubleByID(id:String, definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeDouble(data);
 			
-			return _sendDataByID(id, DataType.DOUBLE, definition, bytes);
+			return _sendDataByID(id, DataType.DOUBLE, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBytesByID(id:String, definition:uint, data:ByteArray):Boolean
+		public function sendBytesByID(id:String, definition:uint, data:ByteArray, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
-			return _sendDataByID(id, DataType.BYTES, definition, data);
+			return _sendDataByID(id, DataType.BYTES, definition, data, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendStringByID(id:String, definition:uint, data:String):Boolean
+		public function sendStringByID(id:String, definition:uint, data:String, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(data, EncodingFormat.encoding);
 			
-			return _sendDataByID(id, DataType.STRING, definition, bytes);
+			return _sendDataByID(id, DataType.STRING, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendArrayByID(id:String, definition:uint, data:Array):Boolean
+		public function sendArrayByID(id:String, definition:uint, data:Array, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
@@ -817,13 +990,15 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendDataByID(id, DataType.ARRAY, definition, bytes);
+			return _sendDataByID(id, DataType.ARRAY, definition, bytes, unity);
 		}
 		
 		/** <p>id가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendObjectByID(id:String, definition:uint, data:Object):Boolean
+		public function sendObjectByID(id:String, definition:uint, data:Object, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
@@ -832,17 +1007,27 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendDataByID(id, DataType.OBJECT, definition, bytes);
+			return _sendDataByID(id, DataType.OBJECT, definition, bytes, unity);
 		}
 		
-		private function _sendDataByPeerID(peerID:String, type:uint, definition:uint, data:ByteArray):Boolean
+		private function _sendDataByPeerID(peerID:String, type:uint, definition:uint, data:ByteArray, unity:Boolean):Boolean
 		{
-			var packet:ByteArray = Packet.create(type, definition, data);
-			if(packet == null){return false;}
+			var peer:P2PPeer = getPeerByPeerID(peerID);
+			if(peer == null || peer.peerStream == null ){return false;}
 			
-			var peer:P2PPeer = _peerIDTable[peerID];
-			if(peer && peer.peerStream)
+			if(unity == true)
 			{
+				var node:Object = UnitedPacketNode.create(type, definition, data);
+				peer._unitedBuffer.push(node);
+				
+				_unitedSendingPeers.push(peer.id);
+				return true;
+			}
+			else
+			{
+				var packet:ByteArray = Packet.create(type, definition, data);
+				if(packet == null){return false;}
+				
 				peer.peerStream.send("sendData", packet);
 				return true;
 			}
@@ -851,159 +1036,185 @@ package gogduNet.connection
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendDefinitionByPeerID(peerID:String, definition:uint):Boolean
+		public function sendDefinitionByPeerID(peerID:String, definition:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
-			return _sendDataByPeerID(peerID, DataType.DEFINITION, definition, null);
+			return _sendDataByPeerID(peerID, DataType.DEFINITION, definition, null, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBooleanByPeerID(peerID:String, definition:uint, data:Boolean):Boolean
+		public function sendBooleanByPeerID(peerID:String, definition:uint, data:Boolean, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeBoolean(data);
 			
-			return _sendDataByPeerID(peerID, DataType.BOOLEAN, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.BOOLEAN, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendByteByPeerID(peerID:String, definition:uint, data:int):Boolean
+		public function sendByteByPeerID(peerID:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendDataByPeerID(peerID, DataType.BYTE, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedByteByPeerID(peerID:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedByteByPeerID(peerID:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeByte(data);
 			
-			return _sendDataByPeerID(peerID, DataType.UNSIGNED_BYTE, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.UNSIGNED_BYTE, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendShortByPeerID(peerID:String, definition:uint, data:int):Boolean
+		public function sendShortByPeerID(peerID:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendDataByPeerID(peerID, DataType.SHORT, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedShortByPeerID(peerID:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedShortByPeerID(peerID:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeShort(data);
 			
-			return _sendDataByPeerID(peerID, DataType.UNSIGNED_SHORT, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.UNSIGNED_SHORT, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendIntByPeerID(peerID:String, definition:uint, data:int):Boolean
+		public function sendIntByPeerID(peerID:String, definition:uint, data:int, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeInt(data);
 			
-			return _sendDataByPeerID(peerID, DataType.INT, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.INT, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendUnsignedIntByPeerID(peerID:String, definition:uint, data:uint):Boolean
+		public function sendUnsignedIntByPeerID(peerID:String, definition:uint, data:uint, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeUnsignedInt(data);
 			
-			return _sendDataByPeerID(peerID, DataType.UNSIGNED_INT, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.UNSIGNED_INT, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendFloatByPeerID(peerID:String, definition:uint, data:Number):Boolean
+		public function sendFloatByPeerID(peerID:String, definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeFloat(data);
 			
-			return _sendDataByPeerID(peerID, DataType.FLOAT, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.FLOAT, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendDoubleByPeerID(peerID:String, definition:uint, data:Number):Boolean
+		public function sendDoubleByPeerID(peerID:String, definition:uint, data:Number, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeDouble(data);
 			
-			return _sendDataByPeerID(peerID, DataType.DOUBLE, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.DOUBLE, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendBytesByPeerID(peerID:String, definition:uint, data:ByteArray):Boolean
+		public function sendBytesByPeerID(peerID:String, definition:uint, data:ByteArray, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
-			return _sendDataByPeerID(peerID, DataType.BYTES, definition, data);
+			return _sendDataByPeerID(peerID, DataType.BYTES, definition, data, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendStringByPeerID(peerID:String, definition:uint, data:String):Boolean
+		public function sendStringByPeerID(peerID:String, definition:uint, data:String, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(data, EncodingFormat.encoding);
 			
-			return _sendDataByPeerID(peerID, DataType.STRING, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.STRING, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendArrayByPeerID(peerID:String, definition:uint, data:Array):Boolean
+		public function sendArrayByPeerID(peerID:String, definition:uint, data:Array, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
@@ -1012,13 +1223,15 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendDataByPeerID(peerID, DataType.ARRAY, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.ARRAY, definition, bytes, unity);
 		}
 		
 		/** <p>peerID가 일치하는 특정 피어에게 데이터를 보낸다.</p>
+		 * <p>unity 인자를 true로 설정하면 패킷을 바로 보내지 않고 잠시 뒤에 다른 패킷과
+		 * 함께 뭉쳐서 보내며, 데이터 사용량을 줄일 수 있습니다.</p>
 		 * <p>패킷 형식이 맞지 않거나 연결되지 않은 등의 이유로 전송이 실패하면 false를, 그 외엔 true를 반환한다.</p>
 		 */
-		public function sendObjectByPeerID(peerID:String, definition:uint, data:Object):Boolean
+		public function sendObjectByPeerID(peerID:String, definition:uint, data:Object, unity:Boolean=false):Boolean
 		{
 			if(_isConnected == false){return false;}
 			
@@ -1027,7 +1240,7 @@ package gogduNet.connection
 			var bytes:ByteArray = new ByteArray();
 			bytes.writeMultiByte(str, EncodingFormat.encoding);
 			
-			return _sendDataByPeerID(peerID, DataType.OBJECT, definition, bytes);
+			return _sendDataByPeerID(peerID, DataType.OBJECT, definition, bytes, unity);
 		}
 		
 		private function _onNetStatus(e:NetStatusEvent):void
@@ -1060,7 +1273,9 @@ package gogduNet.connection
 				//NetGroup is non reusable after NetGroup.close()
 				_netGroup = new NetGroup(_netConnection, _groupSpecifier.groupspecWithAuthorizations());
 				
+				//NetConnection object of NetStream is unchangeable after created
 				_netStream = new NetStream(_netConnection, NetStream.DIRECT_CONNECTIONS);
+				_netStream.dataReliable = true;
 				_netStream.client = {onPeerConnect:_onPeerConnect};
 				_netStream.publish(_netGroupName);
 				return;
@@ -1073,9 +1288,17 @@ package gogduNet.connection
 				
 				_netGroup.addEventListener(NetStatusEvent.NET_STATUS, _onNetStatus);
 				
+				this.addEventListener(DataEvent.DATA_RECEIVE, _receiveUnitedPacket);
+				
 				//first 100 : amount per once run
 				//second 100 : run delay
 				setTimeout(_checkConnection, _checkConnectionDelay, 0, 100, 100);
+				//first 100 : amount per once run
+				//second 100 : run delay
+				setTimeout(_unitedSend, _unitedSendingInterval, 0, 100, 100);
+				
+				_unitedSendingTimer.addEventListener(TimerEvent.TIMER, _unitedSendToAll);
+				_unitedSendingTimer.start();
 				
 				_isConnected = true;
 				_record.addRecord(true, "Connected(connectedTime:" + _connectedTime + ")");
@@ -1128,7 +1351,7 @@ package gogduNet.connection
 				
 				if(peer)
 				{
-					dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, info.peerID) );
+					dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, {id:peer.id, peerID:info.peerID}) );
 					closePeer(peer.id);
 				}
 			}
@@ -1170,7 +1393,7 @@ package gogduNet.connection
 		/** peer를 배열에 저장해 둔다. 그리고 저장된 인덱스를 반환한다. */
 		private function _addPeer(targetPeerID:String):uint
 		{
-			var i:int;
+			var i:uint;
 			for(i = 0; i < _peerArray.length; i += 1)
 			{
 				if(!_peerArray[i])
@@ -1194,6 +1417,7 @@ package gogduNet.connection
 			peer._setParent(this);
 			peer._searchForPeerStream(); //must after _setParent()
 			
+			ns.dataReliable = true;
 			ns.client = {sendData:peer._getData};
 			ns.play(_netGroupName);
 			
@@ -1208,8 +1432,11 @@ package gogduNet.connection
 			_idTable[peer.id] = null;
 			_peerIDTable[peer.peerID] = null;
 			
-			peer.netStream.close();
+			var ns:NetStream = peer.netStream;
+			ns.pause();
+			ns.close();
 			if(peer.peerStream){peer.peerStream.close();}
+			ns.client = {};
 			
 			peer.dispose();
 			
@@ -1234,13 +1461,159 @@ package gogduNet.connection
 			_removePeer(peer);
 		}
 		
+		/** 뭉친 패킷 수신 */
+		private function _receiveUnitedPacket(e:DataEvent):void
+		{
+			if(e.dataType == DataType.SYSTEM)
+			{
+				if(e.dataDefinition == DataDefinition.UNITED_PACKET)
+				{
+					var socketID:String = e.socketID;
+					
+					var bytes:ByteArray = e.data as ByteArray;
+					bytes.position = 0;
+					
+					try{var str:String = bytes.readMultiByte(bytes.length, EncodingFormat.encoding);}
+					catch(e:Error)
+					{
+						dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+						return;
+					}
+					
+					try{var array:Array = JSON.parse(str) as Array;}
+					catch(e:Error)
+					{
+						dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+						return;
+					}
+					
+					var i:uint;
+					for(i = 0; i < array.length; i += 1)
+					{
+						if(!array[i])
+						{
+							dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+							continue;
+						}
+						
+						var obj:Object = array[i];
+						
+						if( !obj.type || !obj.def || !obj.data || !(obj.type is uint) || !(obj.def is uint) || !(obj.data is String) )
+						{
+							dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+							continue;
+						}
+						
+						var type:uint = obj.type;
+						var def:uint = obj.def;
+						var dataStr:String = obj.data;
+						
+						try{var dataBytes:ByteArray = Base64.decode(dataStr);}
+						catch(e:Error)
+						{
+							dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+							continue;
+						}
+						
+						var parsedData:Object = Packet.parseData(type, dataBytes);
+						if(parsedData == null)
+						{
+							dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, socketID, 0, 0, bytes) );
+							continue;
+						}
+						
+						dispatchEvent( new DataEvent(DataEvent.DATA_RECEIVE, false, false, socketID, type, def, parsedData) );
+					}
+				}
+			}
+		}
+		
+		/** 패킷 뭉쳐 보내기(Async) */
+		private function _unitedSend(startIndex:uint, amountPerRun:uint, delay:Number):void
+		{
+			if(_isConnected == false){return;}
+			else if(!_unitedSendingPeers){return;}
+			
+			var i:uint;
+			var j:uint;
+			var id:String;
+			var peer:P2PPeer;
+			
+			for(i = startIndex; (i < startIndex + amountPerRun) && (i < _unitedSendingPeers.length); i += 1)
+			{
+				if(!_unitedSendingPeers[i]){continue;}
+				
+				id = _unitedSendingPeers[i];
+				peer = getPeerByID(id);
+				
+				if(peer == null)
+				{
+					continue;
+				}
+				
+				var buffer:Vector.<Object> = peer._unitedBuffer;
+				
+				var len:uint = buffer.length;
+				var arr:Array = [];
+				
+				//Vector to Array
+				for(j = 0; j < len; j += 1)
+				{
+					arr[j] = buffer[j];
+				}
+				
+				var str:String = JSON.stringify(arr);
+				var bytes:ByteArray = new ByteArray();
+				bytes.writeMultiByte(str, EncodingFormat.encoding);
+				
+				_sendSystemDataByID(id, DataDefinition.UNITED_PACKET, bytes, false);
+				
+				buffer.length = 0;
+			}
+			
+			if(i < _unitedSendingPeers.length-1)
+			{
+				setTimeout(_unitedSend, delay, i, amountPerRun, delay);
+			}
+			else
+			{
+				_unitedSendingPeers.length = 0;
+				setTimeout(_unitedSend, _unitedSendingInterval, 0, amountPerRun, delay);
+			}
+		}
+		
+		/** 패킷 뭉쳐 보내기(모두에게) */
+		private function _unitedSendToAll(e:TimerEvent):void
+		{
+			if(_unitedBuffer.length > 0)
+			{
+				var i:uint;
+				var len:uint = _unitedBuffer.length;
+				var arr:Array = [];
+				
+				//Vector to Array
+				for(i = 0; i < len; i += 1)
+				{
+					arr[i] = _unitedBuffer[i];
+				}
+				
+				var str:String = JSON.stringify(arr);
+				var bytes:ByteArray = new ByteArray();
+				bytes.writeMultiByte(str, EncodingFormat.encoding);
+				
+				_sendSystemData(DataDefinition.UNITED_PACKET, bytes, false);
+				
+				_unitedBuffer.length = 0;
+			}
+		}
+		
 		/** 연결 상태를 검사 */
-		private function _checkConnection(startIndex:int, amountPerRun:uint, delay:Number):void
+		private function _checkConnection(startIndex:uint, amountPerRun:uint, delay:Number):void
 		{
 			if(_isConnected == false){return;}
 			else if(!_peerArray){return;}
 			
-			var i:int;
+			var i:uint;
 			var peer:P2PPeer;
 			var id:String;
 			
@@ -1251,11 +1624,11 @@ package gogduNet.connection
 				peer = _peerArray[i];
 				
 				// 일정 시간 이상 전송이 오지 않을 경우 접속이 끊긴 것으로 간주하여 이쪽에서도 접속을 끊는다.
-				if(peer.elapsedTimeAfterLastReceived > _connectionDelayLimit)
+				if(peer.elapsedTimeAfterLastReceived > _idleTimeoutLimit)
 				{
 					_record.addRecord(true, "Close connection to peer(NoResponding)(id:" + peer.id + ", peerID:" + peer.peerID + ")");
 					
-					dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, peer.peerID) );
+					dispatchEvent( new GogduNetEvent(GogduNetEvent.SOCKET_CLOSE, false, false, {id:peer.id, peerID:peer.peerID}) );
 					
 					_removePeer(peer);
 					continue;
@@ -1298,11 +1671,11 @@ package gogduNet.connection
 				data = datas[i];
 				inData = data.packet;
 				
-				if(data.event == "receive")
+				if(data.event == ParsedNode.RECEIVE_EVENT)
 				{
 					dispatchEvent( new DataEvent(DataEvent.DATA_RECEIVE, false, false, id, inData.type, inData.def, inData.data) );
 				}
-				if(data.event == "invalid")
+				if(data.event == ParsedNode.INVALID_EVENT)
 				{
 					dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, id, 0, 0, inData.data) );
 				}

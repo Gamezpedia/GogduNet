@@ -9,10 +9,9 @@ package gogduNet.connection
 		private var _address:String;
 		private var _port:int;
 		
-		/** 반드시 address, port 속성을 설정해야 한다. */
+		/** 반드시 initialize() 함수를 실행하고 address, port 속성을 설정해야 한다. */
 		public function UDPConnection()
 		{
-			initialize();
 		}
 		
 		override public function initialize():void

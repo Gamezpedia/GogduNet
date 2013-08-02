@@ -110,13 +110,15 @@ package gogduNet.connection
 			_connectionPool = new ObjectPool(UDPConnection);
 		}
 		
-		/** 플래시 네이티브 소켓을 가져온다. */
+		/** <p>클래스 내부의 DatagramSocket 객체를 반환한다.</p>
+		 * <p>close() 함수 등으로 수신이 중단되면 이 속성은 새로 생성된 객체로 바뀐다.</p>
+		 */
 		public function get socket():DatagramSocket
 		{
 			return _socket;
 		}
 		
-		/** 소켓이 바인딩된 local address를 가져오거나 설정한다. 설정은 수신하고 있지 않을 때에만 할 수 있다. */
+		/** 소켓이 바인딩될 local address를 가져오거나 설정한다. 설정은 수신하고 있지 않을 때에만 할 수 있다. */
 		public function get address():String
 		{
 			return _address;
@@ -130,7 +132,7 @@ package gogduNet.connection
 			_socket.bind(_port, _address);
 		}
 		
-		/** 소켓이 바인딩된 local 포트를 가져오거나 설정한다. 설정은 수신하고 있지 않을 때에만 할 수 있다. */
+		/** 소켓이 바인딩될 local 포트를 가져오거나 설정한다. 설정은 수신하고 있지 않을 때에만 할 수 있다. */
 		public function get port():int
 		{
 			return _port;
@@ -144,7 +146,7 @@ package gogduNet.connection
 			_socket.bind(_port, _address);
 		}
 		
-		/** 소켓이 바인딩된 address와 포트를 설정한다. 수신하고 있지 않을 때에만 할 수 있다. */
+		/** 소켓이 바인딩될 address와 포트를 설정한다. 수신하고 있지 않을 때에만 할 수 있다. */
 		public function bind(address:String, port:int):void
 		{
 			if(_isReceiving == true){return;}
@@ -590,11 +592,11 @@ package gogduNet.connection
 				data = datas[i];
 				inData = data.packet;
 				
-				if(data.event == "receive")
+				if(data.event == ParsedNode.RECEIVE_EVENT)
 				{
 					dispatchEvent( new DataEvent(DataEvent.DATA_RECEIVE, false, false, id, inData.type, inData.def, inData.data) );
 				}
-				if(data.event == "invalid")
+				if(data.event == ParsedNode.INVALID_EVENT)
 				{
 					dispatchEvent( new DataEvent(DataEvent.INVALID_DATA, false, false, id, 0, 0, inData.data) );
 				}

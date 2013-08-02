@@ -35,7 +35,7 @@ package gogduNet.connection
 			throw new Error("Don't create instance of this class");
 		}
 		
-		static public function create(type:uint, definition:uint, data:ByteArray=null):ByteArray
+		public static function create(type:uint, definition:uint, data:ByteArray=null):ByteArray
 		{
 			var dataSize:uint;
 			if(data != null)
@@ -86,9 +86,9 @@ package gogduNet.connection
 			return packet;
 		}
 		
-		/** {event:"invalid" or "receive", packet:{type, def, data}}
+		/** ParsedNode.create()로 벡터에 들어갈 Object 객체를 만들 수 있다.
 		 * 데이터가 다 오지 않은 등의 이유로 처리하지 못한 패킷은 인자로 넣은 바이트에 그대로 있다. */
-		static public function parse(bytes:ByteArray):Vector.<Object>
+		public static function parse(bytes:ByteArray):Vector.<Object>
 		{
 			var vector:Vector.<Object> = new <Object>[];
 			var startPosition:uint = 0; //패킷을 읽기 시작할 위치
@@ -104,7 +104,7 @@ package gogduNet.connection
 			//처음의 바이트가 시작 마커가 아닌 경우
 			if(_checkStartMarker(bytes) == false)
 			{
-				var bool:Boolean = _nextOrRemove();
+				var bool:Boolean = _pushInvalidAndremovePrevData();
 				if(bool == false){return vector;}
 				else{bytes.position = 0;}
 			}
@@ -172,19 +172,20 @@ package gogduNet.connection
 				//타입이 def
 				if(type == DataType.DEFINITION)
 				{
-					_pushReturnObject(vector, "receive", type, def, null);
+					_pushReturnObject(vector, ParsedNode.RECEIVE_EVENT, type, def, null);
 					
-					bool = _nextStartMarker();
+					bool = _removePrevData();
 					if(bool == true){continue;}
 					else{return vector;}
 				}
+				
 				//데이터의 크기가 0
 				if(dataSize ==0)
 				{
 					//패킷의 타입이 system이나 bytes인 경우
 					if(type == DataType.SYSTEM || type == DataType.BYTES)
 					{
-						_pushReturnObject(vector, "receive", type, def, new ByteArray());
+						_pushReturnObject(vector, ParsedNode.RECEIVE_EVENT, type, def, new ByteArray());
 						
 						bool = _nextStartMarker();
 						if(bool == true){continue;}
@@ -193,7 +194,7 @@ package gogduNet.connection
 					//타입이 string인 경우
 					else if(type == DataType.STRING)
 					{
-						_pushReturnObject(vector, "receive", type, def, "");
+						_pushReturnObject(vector, ParsedNode.RECEIVE_EVENT, type, def, "");
 						
 						bool = _nextStartMarker();
 						if(bool == true){continue;}
@@ -202,7 +203,7 @@ package gogduNet.connection
 					//타입이 system도 bytes도 string도 아닌 경우
 					else
 					{
-						bool = _nextOrRemove();
+						bool = _pushInvalidAndremovePrevData();
 						if(bool == true){continue;}
 						else{return vector;}
 					}
@@ -213,23 +214,23 @@ package gogduNet.connection
 				
 				if(decodedData == null)
 				{
-					bool = _nextOrRemove();
+					bool = _pushInvalidAndremovePrevData();
 					if(bool == true){continue;}
 					else{return vector;}
 				}
 				
-				var dataObj:Object = _parseData(type, decodedData);
+				var dataObj:Object = parseData(type, decodedData);
 				
 				if(dataObj == null)
 				{
-					bool = _nextOrRemove();
+					bool = _pushInvalidAndremovePrevData();
 					if(bool == true){continue;}
 					else{return vector;}
 				}
 				
-				_pushReturnObject(vector, "receive", type, def, dataObj);
+				_pushReturnObject(vector, ParsedNode.RECEIVE_EVENT, type, def, dataObj);
 				
-				bool = _nextStartMarker();
+				bool = _removePrevData();
 				if(bool == true){continue;}
 				else{return vector;}
 			}
@@ -237,12 +238,18 @@ package gogduNet.connection
 			return vector;
 			
 			//true:you do 'continue;' or nothing, false:you do 'return vector;'
-			function _nextOrRemove():Boolean
+			function _pushInvalidAndremovePrevData():Boolean
 			{
 				//반환 목록에 추가
-				_pushReturnObject(vector, "invalid", 0, 0, bytes);
+				_pushReturnObject(vector, ParsedNode.INVALID_EVENT, 0, 0, bytes);
 				
 				/* 잘못된 데이터를 제거한다. */
+				return _removePrevData();
+			}
+			
+			//true:you do 'continue;' or nothing, false:you do 'return vector;'
+			function _removePrevData():Boolean
+			{
 				var index:Object = _indexOfStartMarker(bytes, startPosition + 1);
 				
 				if(index == null)
@@ -254,6 +261,8 @@ package gogduNet.connection
 				{
 					var indexNum:uint = uint(index);
 					spliceByteArray(bytes, 0, indexNum);
+					startPosition = 0;
+					bytes.position = startPosition;
 					return true;
 				}
 			}
@@ -270,17 +279,19 @@ package gogduNet.connection
 				
 				var indexNum:uint = uint(index);
 				startPosition = indexNum;
+				bytes.position = startPosition;
 				return true;
 			}
 		}
 		
-		/** 반환 목록에 추가 */
-		static private function _pushReturnObject(vector:Vector.<Object>, event:String, type:uint, def:uint, data:Object):void
+		/** 가공한 패킷을 반환 목록에 추가 */
+		private static function _pushReturnObject(vector:Vector.<Object>, event:String, type:uint, def:uint, data:Object):void
 		{
-			vector.push( {event:event, packet:{type:type, def:def, data:data}} );
+			var obj:Object = ParsedNode.create(event, type, def, data);
+			vector.push( obj );
 		}
 		
-		static private function _checkStartMarker(bytes:ByteArray):Boolean
+		private static function _checkStartMarker(bytes:ByteArray):Boolean
 		{
 			var sm:uint = bytes.readUnsignedShort();
 			
@@ -293,7 +304,7 @@ package gogduNet.connection
 		}
 		
 		//return uint or null
-		static private function _indexOfStartMarker(bytes:ByteArray, startIndex:uint=0):Object
+		private static function _indexOfStartMarker(bytes:ByteArray, startIndex:uint=0):Object
 		{
 			var i:uint;
 			var len:uint = bytes.length - START_MARKER_SIZE;
@@ -310,28 +321,28 @@ package gogduNet.connection
 			return null;
 		}
 		
-		static private function _getTypeHeader(bytes:ByteArray, startPosition:uint):uint
+		private static function _getTypeHeader(bytes:ByteArray, startPosition:uint):uint
 		{
 			bytes.position = startPosition + TYPE_HEADER_POSITION;
 			
 			return bytes.readUnsignedByte();
 		}
 		
-		static private function _getDefHeader(bytes:ByteArray, startPosition:uint):uint
+		private static function _getDefHeader(bytes:ByteArray, startPosition:uint):uint
 		{
 			bytes.position = startPosition + DEFINITION_HEADER_POSITION;
 			
 			return bytes.readUnsignedShort();
 		}
 		
-		static private function _getDataSizeHeader(bytes:ByteArray, startPosition:uint):uint
+		private static function _getDataSizeHeader(bytes:ByteArray, startPosition:uint):uint
 		{
 			bytes.position = startPosition + DATA_SIZE_HEADER_POSITION;
 			
 			return bytes.readUnsignedInt();
 		}
 		
-		static private function _isCanReadData(bytes:ByteArray, startPosition:uint, dataSize:uint):Boolean
+		private static function _isCanReadData(bytes:ByteArray, startPosition:uint, dataSize:uint):Boolean
 		{
 			bytes.position = startPosition + DATA_POSITION;
 			
@@ -343,7 +354,7 @@ package gogduNet.connection
 			return false;
 		}
 		
-		static private function _isCanReadChecksum(bytes:ByteArray, startPosition:uint, dataSize:uint):Boolean
+		private static function _isCanReadChecksum(bytes:ByteArray, startPosition:uint, dataSize:uint):Boolean
 		{
 			bytes.position = startPosition + HEADER_SIZE + dataSize;
 			
@@ -355,14 +366,14 @@ package gogduNet.connection
 			return false;
 		}
 		
-		static private function _getChecksumData(bytes:ByteArray, startPosition:uint, dataSize:uint):uint
+		private static function _getChecksumData(bytes:ByteArray, startPosition:uint, dataSize:uint):uint
 		{
 			bytes.position = startPosition + HEADER_SIZE + dataSize;
 			
 			return bytes.readUnsignedShort();
 		}
 		
-		static private function _getChecksum(bytes:ByteArray):uint
+		private static function _getChecksum(bytes:ByteArray):uint
 		{
 			var i:uint;
 			var len:uint = bytes.length;
@@ -376,7 +387,7 @@ package gogduNet.connection
 			return (sum & 0xff) + (sum >> 16);
 		}
 		
-		static private function _isCanReadEndMarker(bytes:ByteArray, startPosition:uint, dataSize:uint):Boolean
+		private static function _isCanReadEndMarker(bytes:ByteArray, startPosition:uint, dataSize:uint):Boolean
 		{
 			bytes.position = startPosition + HEADER_SIZE + dataSize + CHECKSUM_SIZE;
 			
@@ -388,14 +399,14 @@ package gogduNet.connection
 			return false;
 		}
 		
-		static private function _getEndMarker(bytes:ByteArray, startPosition:uint, dataSize:uint):uint
+		private static function _getEndMarker(bytes:ByteArray, startPosition:uint, dataSize:uint):uint
 		{
 			bytes.position = startPosition + DATA_POSITION + dataSize + CHECKSUM_SIZE;
 			
 			return bytes.readUnsignedShort();
 		}
 		
-		static private function _getData(bytes:ByteArray, startPosition:uint, dataSize:uint, result:ByteArray=null):ByteArray
+		private static function _getData(bytes:ByteArray, startPosition:uint, dataSize:uint, result:ByteArray=null):ByteArray
 		{
 			if(result == null)
 			{
@@ -408,7 +419,7 @@ package gogduNet.connection
 		}
 		
 		/** data 인자로부터 type 인자에 맞는 데이터를 추출한다. 잘못된 패킷인 경우엔 null을 반환한다. */
-		static private function _parseData(type:int, bytes:ByteArray):Object
+		public static function parseData(type:uint, bytes:ByteArray):Object
 		{
 			var obj:Object = null;
 			var str:String;

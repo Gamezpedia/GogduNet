@@ -11,10 +11,11 @@ package gogduNet.connection
 		
 		private var _parent:P2PClient;
 		
-		/** 반드시 netStream, id 속성을 설정해야 한다. */
+		private var __unitedBuffer:Vector.<Object>;
+		
+		/** 반드시 initialize() 함수를 실행하고 netStream, id 속성을 설정해야 한다. */
 		public function P2PPeer()
 		{
-			initialize();
 		}
 		
 		override public function initialize():void
@@ -25,6 +26,8 @@ package gogduNet.connection
 			_peerStream = null;
 			
 			_parent = null;
+			
+			__unitedBuffer = new <Object>[];
 		}
 		
 		/** 라이브러리 내부에서 자동으로 실행되는 함수 */
@@ -42,6 +45,15 @@ package gogduNet.connection
 		internal function setNetStream(value:NetStream):void
 		{
 			_netStream = value;
+		}
+		
+		/** 패킷을 한 번에 뭉쳐서 보내기 위해 사용되는 배열 버퍼이며,
+		 * 배열에 사용되는 Object 객체는 UnitedPacketNod.create()로 만들 수 있다.
+		 * (이 속성은 건드리지 않는 것이 좋다.)
+		 */
+		internal function get _unitedBuffer():Vector.<Object>
+		{
+			return __unitedBuffer;
 		}
 		
 		/** 데이터 전송에 쓰는 스트림을 가져온다.<p/>
@@ -95,6 +107,7 @@ package gogduNet.connection
 			if(stream)
 			{
 				_peerStream = stream;
+				_peerStream.dataReliable = true;
 			}
 			else
 			{
@@ -122,6 +135,8 @@ package gogduNet.connection
 			_peerStream = null;
 			
 			_parent = null;
+			
+			__unitedBuffer = null;
 		}
 	}
 }
