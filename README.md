@@ -2,6 +2,7 @@
 =====
 
 **GogduNet** - Flash AS3 Communication Library for **TCP** and **UDP** and **P2P**
+
 Automatic packet filtering, packet united sending, connection management, etc.
 
 Version 4.0 (2013.8.3.)
@@ -24,6 +25,7 @@ Structure
 ![My image](GogduNet.png)
 
 
+-----
 TCPServer : AIR 3.0 Desktop, AIR 3.8
 
 TCPClient : Flash Player 11, AIR 3.0
@@ -39,6 +41,9 @@ UDPClient : AIR 3.0 Desktop, AIR 3.8
 P2PClient : Flash Player 11, AIR 3.0
 
 
+-----
 Use actionscript-uuid
+
 https://code.google.com/p/actionscript-uuid/
+
 yonghaolai6@gmail.com
